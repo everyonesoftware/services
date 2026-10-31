@@ -7,11 +7,14 @@ Services is a Compose-first dashboard for monitoring the current health of Compo
 - Groups containers by Docker Compose project/service labels.
 - Aggregates project health from each container's running state and configured Docker health check.
 - Refreshes the dashboard every 30 seconds.
-- Uses Docker Engine API discovery only; it does not change containers or Compose files.
+- Reads container image repository digests from Docker Engine and checks public Docker Hub and GHCR tags.
+- Checks each supported running image at startup and every six hours, comparing the configured tag's registry manifest digest with the running image's recorded digest; failed registry checks retry after 15 minutes.
+- Shows a read-only **Update available** pill on affected containers and their Compose groups; it never pulls, replaces, or restarts containers.
+- Checks the exact configured tag, including `latest`; digest-pinned, private, unsupported-registry, and images without a matching local repository digest cannot be reported as updated.
 - Compose projects with no configured health checks are shown as **Running**; projects with configured checks that pass are shown as **Healthy**.
 - Unlabelled, non-Compose containers are not shown.
 
-Update detection (Docker Hub/GHCR), settings, notifications, and update approval are not implemented yet.
+Registry update detection is read-only. A changed manifest digest means the configured tag now points to a different image; tags are not semantically ordered, so this does not claim a version-number comparison. Settings, notifications, and update approval are not implemented.
 
 ## CI and GHCR publishing
 
@@ -37,9 +40,9 @@ docker compose up --build -d
 
 Open `http://localhost:8080` or the server's Tailnet address on port 8080. No separate login is included; use Tailnet ACLs and avoid publishing this port to the public internet.
 
-The Compose file mounts `/var/run/docker.sock` so Services can query Docker Desktop's Linux Engine. **The socket is highly privileged**: a read-only bind mount does not make Docker API access read-only. The current app only sends GET requests, but anyone who can compromise it may be able to control the Docker host through the socket. Keep the dashboard Tailnet-restricted and do not expose it publicly. Docker Desktop socket availability and mount behavior must be verified on the target installation.
+The Compose file mounts `/var/run/docker.sock` so Services can query Docker Desktop's Linux Engine. **The socket is highly privileged**: a read-only bind mount does not make Docker API access read-only. The app currently sends read-only Docker API requests, but anyone who can compromise it may be able to control the Docker host through the socket. Keep the dashboard Tailnet-restricted and do not expose it publicly. Docker Desktop socket availability and mount behavior must be verified on the target installation.
 
-Your existing Compose project folders are not mounted or modified by this app. The project manager/update features will need a separate, explicit design before any Compose files are accessed.
+Your existing Compose project folders are not mounted or modified by this app. Update detection reads registry metadata only; it does not access Compose files or pull/recreate containers.
 
 ## Development
 

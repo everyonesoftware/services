@@ -56,3 +56,13 @@ func TestAggregateKeepsUnlabelledContainersOutOfComposeGroups(t *testing.T) {
 		t.Fatalf("Aggregate() returned %d groups for an unlabelled container, want 0", len(got))
 	}
 }
+
+func TestAggregateMarksProjectWhenAnyContainerHasAnUpdate(t *testing.T) {
+	got := Aggregate([]Container{
+		{Project: "media", Service: "app", State: "running"},
+		{Project: "media", Service: "worker", State: "running", UpdateAvailable: true},
+	})
+	if len(got) != 1 || !got[0].UpdateAvailable {
+		t.Fatalf("Aggregate() = %+v, want media project with update available", got)
+	}
+}

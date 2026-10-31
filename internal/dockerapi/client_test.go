@@ -12,7 +12,12 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 		case "/version":
 			_, _ = w.Write([]byte(`{"ApiVersion":"1.47"}`))
 		case "/v1.47/containers/json":
-			_, _ = w.Write([]byte(`[{"Id":"abc","Names":["/web-1"],"State":"running","Image":"jellyfin/jellyfin:latest","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}}]`))
+			_, _ = w.Write([]byte(`[{"Id":"abc","Names":["/web-1"],"State":"running","Image":"jellyfin/jellyfin:latest","ImageID":"sha256:image","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}}]`))
+		case "/v1.47/images/json":
+			if r.URL.Query().Get("digests") != "1" {
+				t.Errorf("images query = %q, want digests=1", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`[{"Id":"sha256:image","RepoDigests":["jellyfin/jellyfin@sha256:manifest"]}]`))
 		case "/v1.47/containers/abc/json":
 			_, _ = w.Write([]byte(`{"Config":{"Image":"nginx:latest"},"State":{"Status":"running","Health":{"Status":"healthy"}}}`))
 		default:
@@ -35,5 +40,8 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 	}
 	if got.Image != "jellyfin/jellyfin:latest" {
 		t.Fatalf("container image = %q, want jellyfin/jellyfin:latest", got.Image)
+	}
+	if len(got.RepoDigests) != 1 || got.RepoDigests[0] != "jellyfin/jellyfin@sha256:manifest" {
+		t.Fatalf("container repo digests = %v, want the running image's repository digest", got.RepoDigests)
 	}
 }

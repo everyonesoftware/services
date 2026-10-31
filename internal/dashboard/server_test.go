@@ -12,11 +12,17 @@ type fakeSource struct{ containers []groups.Container }
 
 func (f fakeSource) Containers() ([]groups.Container, error) { return f.containers, nil }
 
+type fakeUpdateApplier struct{}
+
+func (fakeUpdateApplier) Apply(containers []groups.Container) {
+	containers[0].UpdateAvailable = true
+}
+
 func TestProjectsEndpointReturnsComposeGroupsAndStatus(t *testing.T) {
-	server := New(fakeSource{containers: []groups.Container{
+	server := NewWithUpdates(fakeSource{containers: []groups.Container{
 		{ID: "abc", Name: "api-1", Project: "store", Service: "api", State: "running", Health: "healthy"},
 		{ID: "def", Name: "db-1", Project: "store", Service: "db", State: "exited"},
-	}}, 42)
+	}}, fakeUpdateApplier{}, 42)
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, httptest.NewRequest("GET", "/api/projects", nil))
 
@@ -31,5 +37,8 @@ func TestProjectsEndpointReturnsComposeGroupsAndStatus(t *testing.T) {
 	}
 	if len(body.Projects) != 1 || body.Projects[0].Name != "store" || body.Projects[0].Status != groups.StatusUnhealthy {
 		t.Fatalf("projects = %+v, want one unhealthy store project", body.Projects)
+	}
+	if !body.Projects[0].UpdateAvailable || !body.Projects[0].Containers[0].UpdateAvailable {
+		t.Fatalf("projects = %+v, want update status on container and group", body.Projects)
 	}
 }

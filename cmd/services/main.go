@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"services/internal/dashboard"
 	"services/internal/dockerapi"
+	"services/internal/updates"
 )
 
 var appVersion = "0"
@@ -26,9 +28,12 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	source := dockerapi.NewUnixSocketClient(socket)
+	checker := updates.NewChecker(updates.NewRegistryClient(nil), 0)
+	go checker.Run(context.Background(), source)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           dashboard.New(dockerapi.NewUnixSocketClient(socket), version),
+		Handler:           dashboard.NewWithUpdates(source, checker, version),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("Services listening on %s", addr)

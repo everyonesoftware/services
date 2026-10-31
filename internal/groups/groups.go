@@ -12,22 +12,25 @@ const (
 	StatusUnhealthy Status = "unhealthy"
 )
 
-// Container is the subset of Docker container data needed for project health.
+// Container is the Docker data needed for project health and image-update status.
 type Container struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Project string `json:"project"`
-	Service string `json:"service"`
-	Image   string `json:"image"`
-	State   string `json:"state"`
-	Health  string `json:"health,omitempty"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Project         string   `json:"project"`
+	Service         string   `json:"service"`
+	Image           string   `json:"image"`
+	State           string   `json:"state"`
+	Health          string   `json:"health,omitempty"`
+	RepoDigests     []string `json:"-"`
+	UpdateAvailable bool     `json:"updateAvailable,omitempty"`
 }
 
 // Project groups Compose containers under their Compose project label.
 type Project struct {
-	Name       string      `json:"name"`
-	Status     Status      `json:"status"`
-	Containers []Container `json:"containers"`
+	Name            string      `json:"name"`
+	Status          Status      `json:"status"`
+	Containers      []Container `json:"containers"`
+	UpdateAvailable bool        `json:"updateAvailable,omitempty"`
 }
 
 // Aggregate groups Compose-managed containers and derives one project status.
@@ -43,10 +46,18 @@ func Aggregate(containers []Container) []Project {
 
 	projects := make([]Project, 0, len(byName))
 	for name, members := range byName {
+		updateAvailable := false
+		for _, member := range members {
+			if member.UpdateAvailable {
+				updateAvailable = true
+				break
+			}
+		}
 		projects = append(projects, Project{
-			Name:       name,
-			Status:     projectStatus(members),
-			Containers: members,
+			Name:            name,
+			Status:          projectStatus(members),
+			Containers:      members,
+			UpdateAvailable: updateAvailable,
 		})
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].Name < projects[j].Name })
@@ -88,4 +99,3 @@ func projectStatus(containers []Container) Status {
 	}
 	return StatusRunning
 }
-

@@ -10,8 +10,9 @@ type Container = {
   image?: string
   state: string
   health?: string
+  updateAvailable?: boolean
 }
-type Project = { name: string; status: string; containers: Container[] }
+type Project = { name: string; status: string; containers: Container[]; updateAvailable?: boolean }
 type VersionPayload = { version: number }
 type Payload = { projects: Project[] }
 
@@ -123,7 +124,10 @@ function ProjectCard({ project }: { project: Project }) {
         </span>
         <div><h3>{project.name}</h3><span className="service-count">{project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span></div>
       </div>
-      <span className={`status-pill ${project.status}`}><i />{label}</span>
+      <div className="project-status-group">
+        {project.updateAvailable && <span className="update-pill">Update available</span>}
+        <span className={`status-pill ${project.status}`}><i />{label}</span>
+      </div>
     </summary>
     <div className="container-list">
       {project.containers.map((container) => {
@@ -133,7 +137,10 @@ function ProjectCard({ project }: { project: Project }) {
           <span className={`container-indicator ${tone}`} />
           <span className="container-name" title={container.name}>{container.service || container.name}</span>
           <span className="container-image" title={container.image || 'Image not reported'}>{container.image || 'Image not reported'}</span>
-          <span className={`container-state ${status}`}>{status}</span>
+          <span className={`container-state ${status}`}>
+            {container.updateAvailable && <span className="update-pill container-update-pill">Update available</span>}
+            <span>{status}</span>
+          </span>
         </div>
       })}
     </div>

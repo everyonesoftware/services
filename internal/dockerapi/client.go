@@ -38,11 +38,17 @@ type engineVersion struct {
 }
 
 type containerSummary struct {
-	ID     string            `json:"Id"`
-	Names  []string          `json:"Names"`
-	State  string            `json:"State"`
-	Image  string            `json:"Image"`
-	Labels map[string]string `json:"Labels"`
+	ID      string            `json:"Id"`
+	Names   []string          `json:"Names"`
+	State   string            `json:"State"`
+	Image   string            `json:"Image"`
+	ImageID string            `json:"ImageID"`
+	Labels  map[string]string `json:"Labels"`
+}
+
+type imageSummary struct {
+	ID          string   `json:"Id"`
+	RepoDigests []string `json:"RepoDigests"`
 }
 
 type containerInspect struct {
@@ -67,6 +73,13 @@ func (c *Client) Containers() ([]groups.Container, error) {
 	if err := c.get(prefix+"/containers/json?all=1", &summaries); err != nil {
 		return nil, fmt.Errorf("list Docker containers: %w", err)
 	}
+	var images []imageSummary
+	imageDigests := make(map[string][]string)
+	if err := c.get(prefix+"/images/json?all=1&digests=1", &images); err == nil {
+		for _, image := range images {
+			imageDigests[image.ID] = image.RepoDigests
+		}
+	}
 
 	containers := make([]groups.Container, 0, len(summaries))
 	for _, summary := range summaries {
@@ -76,12 +89,13 @@ func (c *Client) Containers() ([]groups.Container, error) {
 			summary.Names[0] = strings.TrimPrefix(summary.Names[0], "/")
 		}
 		container := groups.Container{
-			ID:      summary.ID,
-			Name:    first(summary.Names),
-			Project: summary.Labels[composeProjectLabel],
-			Service: summary.Labels[composeServiceLabel],
-			Image:   summary.Image,
-			State:   state,
+			ID:          summary.ID,
+			Name:        first(summary.Names),
+			Project:     summary.Labels[composeProjectLabel],
+			Service:     summary.Labels[composeServiceLabel],
+			Image:       summary.Image,
+			State:       state,
+			RepoDigests: imageDigests[summary.ImageID],
 		}
 		var inspect containerInspect
 		path := prefix + "/containers/" + url.PathEscape(summary.ID) + "/json"

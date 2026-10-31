@@ -11,14 +11,23 @@ type ContainerSource interface {
 	Containers() ([]groups.Container, error)
 }
 
+type UpdateApplier interface {
+	Apply([]groups.Container)
+}
+
 type Server struct {
 	source  ContainerSource
+	updates UpdateApplier
 	version int
 	mux     *http.ServeMux
 }
 
 func New(source ContainerSource, version int) *Server {
-	s := &Server{source: source, version: version, mux: http.NewServeMux()}
+	return NewWithUpdates(source, nil, version)
+}
+
+func NewWithUpdates(source ContainerSource, updates UpdateApplier, version int) *Server {
+	s := &Server{source: source, updates: updates, version: version, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/projects", s.projects)
 	s.mux.HandleFunc("GET /api/version", s.versionInfo)
 	s.mux.Handle("GET /", http.FileServer(http.Dir("web/dist")))
@@ -41,6 +50,9 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Docker engine unavailable", http.StatusServiceUnavailable)
 		return
+	}
+	if s.updates != nil {
+		s.updates.Apply(containers)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(struct {
