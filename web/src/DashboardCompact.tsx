@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { iconForProject } from './brandIcons.js'
+import { countAvailableUpdates } from './updateMetrics.js'
 import './dashboard-compact.css'
 
 type Container = {
@@ -64,6 +65,7 @@ export default function DashboardCompact() {
   const attention = projects.filter((project) => project.status === 'starting').length
   const containerCount = projects.reduce((total, project) => total + project.containers.length, 0)
   const needsAttention = unhealthy + attention
+  const availableUpdates = countAvailableUpdates(projects)
 
   return <main className="shell">
     <aside className="sidebar">
@@ -91,6 +93,7 @@ export default function DashboardCompact() {
           <SummaryMetric label="PROJECTS" value={loading ? '—' : projects.length} />
           <SummaryMetric label="CONTAINERS" value={loading ? '—' : containerCount} />
           <SummaryMetric label="NEEDS ATTENTION" value={loading ? '—' : needsAttention} tone={needsAttention ? 'attention' : 'good'} />
+          <SummaryMetric label="UPDATES" value={loading ? '—' : availableUpdates} tone={availableUpdates ? 'attention' : 'good'} />
         </div>
 
         <div className="section-head">

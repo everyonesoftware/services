@@ -43,6 +43,10 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Run frontend update metric tests
+        working-directory: web
+        run: npm run test:updates
+
       - name: Build frontend
         working-directory: web
         run: npm run build
