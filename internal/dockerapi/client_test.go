@@ -12,7 +12,7 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 		case "/version":
 			_, _ = w.Write([]byte(`{"ApiVersion":"1.47"}`))
 		case "/v1.47/containers/json":
-			_, _ = w.Write([]byte(`[{"Id":"abc","Names":["/web-1"],"State":"running","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}}]`))
+			_, _ = w.Write([]byte(`[{"Id":"abc","Names":["/web-1"],"State":"running","Image":"jellyfin/jellyfin:latest","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}}]`))
 		case "/v1.47/containers/abc/json":
 			_, _ = w.Write([]byte(`{"Config":{"Image":"nginx:latest"},"State":{"Status":"running","Health":{"Status":"healthy"}}}`))
 		default:
@@ -32,5 +32,8 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 	got := containers[0]
 	if got.Project != "shop" || got.Service != "web" || got.State != "running" || got.Health != "healthy" {
 		t.Fatalf("container = %+v, want Compose metadata and healthy state", got)
+	}
+	if got.Image != "jellyfin/jellyfin:latest" {
+		t.Fatalf("container image = %q, want jellyfin/jellyfin:latest", got.Image)
 	}
 }

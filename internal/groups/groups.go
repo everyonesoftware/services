@@ -18,6 +18,7 @@ type Container struct {
 	Name    string `json:"name"`
 	Project string `json:"project"`
 	Service string `json:"service"`
+	Image   string `json:"image"`
 	State   string `json:"state"`
 	Health  string `json:"health,omitempty"`
 }

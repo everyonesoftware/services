@@ -80,6 +80,7 @@ func (c *Client) Containers() ([]groups.Container, error) {
 			Name:    first(summary.Names),
 			Project: summary.Labels[composeProjectLabel],
 			Service: summary.Labels[composeServiceLabel],
+			Image:   summary.Image,
 			State:   state,
 		}
 		var inspect containerInspect
