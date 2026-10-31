@@ -3,10 +3,12 @@ import './dashboard.css'
 
 type Container = { id: string; name: string; project: string; service: string; state: string; health?: string }
 type Project = { name: string; status: string; containers: Container[] }
+type VersionPayload = { version: number }
 type Payload = { projects: Project[] }
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
+  const [version, setVersion] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
@@ -26,11 +28,22 @@ export default function Dashboard() {
     const timer = window.setInterval(refresh, 30_000)
     return () => { active = false; window.clearInterval(timer) }
   }, [])
+  useEffect(() => {
+    let active = true
+    void fetch('/api/version', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error('Version unavailable')
+        return response.json() as Promise<VersionPayload>
+      })
+      .then((data) => { if (active) setVersion(data.version) })
+      .catch(() => { if (active) setVersion(null) })
+    return () => { active = false }
+  }, [])
   const unhealthy = projects.filter((project) => project.status === 'unhealthy').length
   const attention = projects.filter((project) => project.status === 'starting' || project.status === 'running-unverified').length
   return <main className="shell">
     <aside className="sidebar"><div className="brand"><span className="brand-mark">S</span><span>Services</span></div><div className="nav-label">WORKSPACE</div><div className="nav-item"><span className="nav-icon">▦</span> Compose projects <span className="nav-count">{projects.length}</span></div><div className="sidebar-bottom"><span className={`connection-dot ${error ? 'offline' : ''}`} /> Docker Engine <span className="connection-state">{error ? 'offline' : 'connected'}</span></div></aside>
-    <section className="main-content"><header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Compose projects</div><div className="topbar-right"><span className="live-indicator"><i /> LIVE</span><span className="avatar">S</span></div></header>
+    <section className="main-content"><header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Compose projects</div><div className="topbar-right"><span className="live-indicator"><i /> LIVE</span><span className="version-badge">Version {version ?? '—'}</span><span className="avatar">S</span></div></header>
       <div className="content-wrap"><div className="page-heading"><div><div className="eyebrow">DOCKER COMPOSE</div><h1>Projects</h1><p className="subtitle">A live overview of your Compose services.</p></div><div className="refresh-note">↻ &nbsp;Refreshes every 30 seconds</div></div>
         {error && <div className="alert"><span className="alert-icon">!</span><div><strong>Unable to reach Docker</strong><p>{error}. Check the Docker socket mount and restart Services.</p></div></div>}
         <div className="stats-grid"><SummaryCard label="COMPOSE PROJECTS" value={loading ? '—' : String(projects.length)} icon="▦" tone="blue" detail="Discovered from Docker labels" /><SummaryCard label="UNHEALTHY" value={loading ? '—' : String(unhealthy)} icon="!" tone={unhealthy ? 'red' : 'green'} detail={unhealthy ? 'Needs attention' : 'No failing projects'} /><SummaryCard label="STARTING / UNVERIFIED" value={loading ? '—' : String(attention)} icon="◷" tone="amber" detail="Starting or lacking health checks" /></div>

@@ -1,6 +1,10 @@
 services:
   services:
-    build: .
+    image: ghcr.io/everyonesoftware/services:${APP_VERSION:-0}
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-0}
     container_name: services
     restart: unless-stopped
     group_add:

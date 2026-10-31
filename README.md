@@ -15,7 +15,16 @@ Update detection (Docker Hub/GHCR), settings, notifications, and update approval
 
 ## CI and GHCR publishing
 
-`.github/workflows/verify-and-publish.yml` runs the frontend build, Go tests, and Docker image build for pull requests and pushes. Pushes to the default branch or a `v*` tag publish `ghcr.io/everyonesoftware/services` with `latest` (default branch), branch/tag, and commit-SHA tags. Pull requests run verification only. Publishing uses the workflow's `GITHUB_TOKEN` with package-write permission; no personal token is needed in repository secrets.
+`.github/workflows/verify-and-publish.yml` runs the frontend build, Go tests, and Docker image build for pull requests and pushes. Pushes to the default branch or a `v*` tag publish `ghcr.io/everyonesoftware/services` with the numeric version, `latest` (default branch), branch/tag, and commit-SHA tags. Pull requests run verification only. Publishing uses the workflow's `GITHUB_TOKEN` with package-write permission; no personal token is needed in repository secrets.
+
+## Version number
+
+The displayed version is the number of Git commits reachable from the build's `HEAD`. CI checks out full history, calculates that integer, injects it into the app, and uses it as an additional GHCR tag. For a local Docker Desktop build in PowerShell, calculate the same value before starting Compose:
+
+```powershell
+$env:APP_VERSION = (git rev-list --count HEAD).Trim()
+docker compose up --build -d
+```
 
 ## Run with Docker Desktop
 

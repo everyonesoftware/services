@@ -16,7 +16,7 @@ func TestProjectsEndpointReturnsComposeGroupsAndStatus(t *testing.T) {
 	server := New(fakeSource{containers: []groups.Container{
 		{ID: "abc", Name: "api-1", Project: "store", Service: "api", State: "running", Health: "healthy"},
 		{ID: "def", Name: "db-1", Project: "store", Service: "db", State: "exited"},
-	}})
+	}}, 42)
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, httptest.NewRequest("GET", "/api/projects", nil))
 

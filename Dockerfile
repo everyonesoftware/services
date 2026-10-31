@@ -12,7 +12,8 @@ WORKDIR /src
 COPY go.mod ./
 COPY . .
 COPY --from=web-build /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/services ./cmd/services
+ARG APP_VERSION=0
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.appVersion=${APP_VERSION}" -o /out/services ./cmd/services
 
 # Minimal runtime image.
 FROM alpine:3.22

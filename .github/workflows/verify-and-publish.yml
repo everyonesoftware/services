@@ -14,9 +14,17 @@ jobs:
   verify:
     name: Test and build
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Calculate commit-count version
+        id: version
+        run: echo "value=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -43,7 +51,7 @@ jobs:
         run: go test ./...
 
       - name: Build container image
-        run: docker build --tag services:ci .
+        run: docker build --build-arg APP_VERSION=${{ steps.version.outputs.value }} --tag services:${{ steps.version.outputs.value }} .
 
   publish:
     name: Publish image to GHCR
@@ -73,6 +81,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
+            type=raw,value=${{ needs.verify.outputs.version }}
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=ref,event=tag
@@ -83,5 +92,6 @@ jobs:
         with:
           context: .
           push: true
+          build-args: APP_VERSION=${{ needs.verify.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
