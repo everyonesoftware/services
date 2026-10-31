@@ -3,6 +3,7 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"services/internal/groups"
@@ -20,7 +21,7 @@ func (fakeUpdateApplier) Apply(containers []groups.Container) {
 
 func TestProjectsEndpointReturnsComposeGroupsAndStatus(t *testing.T) {
 	server := NewWithUpdates(fakeSource{containers: []groups.Container{
-		{ID: "abc", Name: "api-1", Project: "store", Service: "api", State: "running", Health: "healthy"},
+		{ID: "abc", Name: "api-1", Project: "store", Service: "api", ImageTags: []string{"example/api:1.0", "example/api:latest"}, State: "running", Health: "healthy"},
 		{ID: "def", Name: "db-1", Project: "store", Service: "db", State: "exited"},
 	}}, fakeUpdateApplier{}, 42)
 	response := httptest.NewRecorder()
@@ -40,5 +41,9 @@ func TestProjectsEndpointReturnsComposeGroupsAndStatus(t *testing.T) {
 	}
 	if !body.Projects[0].UpdateAvailable || !body.Projects[0].Containers[0].UpdateAvailable {
 		t.Fatalf("projects = %+v, want update status on container and group", body.Projects)
+	}
+	wantTags := []string{"example/api:1.0", "example/api:latest"}
+	if !reflect.DeepEqual(body.Projects[0].Containers[0].ImageTags, wantTags) {
+		t.Fatalf("container image tags = %v, want %v", body.Projects[0].Containers[0].ImageTags, wantTags)
 	}
 }

@@ -28,3 +28,14 @@ h1{font-size:21px;letter-spacing:-.45px;margin:0;color:#f1f4f9;font-weight:600}.
 @media(max-width:800px){.sidebar{width:52px;padding:14px 7px}.brand{padding:0 5px 23px}.brand>span:last-child,.nav-label,.nav-count,.sidebar-bottom{display:none}.nav-item{font-size:0;justify-content:center;padding:0}.nav-icon{font-size:15px}.topbar{padding:0 15px}.content-wrap{padding:18px 15px}.container-row{grid-template-columns:6px minmax(75px,1fr) minmax(60px,auto)}}
 @media(max-width:760px){.project-list{grid-template-columns:1fr}}
 @media(max-width:520px){.sidebar{display:none}.content-wrap{padding:15px 11px}.topbar{height:40px;padding:0 11px}.breadcrumb{font-size:9px}.page-heading{align-items:flex-start;gap:8px;flex-direction:column}.summary-metric{min-width:0;flex:1;padding:5px 8px;gap:7px}.summary-metric:first-child{padding-left:8px}.summary-label{font-size:7px}.summary-metric strong{font-size:12px}.section-head{margin-top:14px}.updated{font-size:8px}.container-row{grid-template-columns:6px minmax(65px,1fr) minmax(55px,auto);gap:6px}.container-image{display:none}.container-name,.container-state{font-size:9px}.project-top{min-height:44px;padding:5px 8px}}
+.container-image-group{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.container-image{flex:1;min-width:0}
+.container-image-tags{flex:none;min-width:0;max-width:100%;color:#89a6c8;font-size:8px;text-transform:none}
+.container-image-tags>summary{padding:2px 5px;border:1px solid #2b3748;border-radius:4px;background:#161e29;color:#94b6e1;cursor:pointer;list-style:none;white-space:nowrap}
+.container-image-tags>summary::-webkit-details-marker{display:none}
+.container-image-tags>summary::before{content:'+';margin-right:4px;color:#8ca8ca}
+.container-image-tags[open]>summary::before{content:'−'}
+.container-image-tags ul{max-width:min(340px,calc(100vw - 48px));margin:4px 0 0;padding:5px 7px;border:1px solid #2b3748;border-radius:4px;background:#10151c;list-style:none;box-sizing:border-box}
+.container-image-tags li{color:#aebbd0;font:8px/1.5 'IBM Plex Mono',monospace;overflow-wrap:anywhere}
+@media(max-width:800px){.container-row{grid-template-columns:6px minmax(65px,.8fr) minmax(0,1.6fr) minmax(60px,auto)}}
+@media(max-width:520px){.container-row{grid-template-columns:6px minmax(0,1fr) auto;grid-template-rows:auto auto;row-gap:4px}.container-indicator{grid-row:1}.container-name{grid-column:2;grid-row:1}.container-image-group{grid-column:2/4;grid-row:2;width:100%}.container-image{display:block}.container-state{grid-column:3;grid-row:1}}

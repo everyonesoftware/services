@@ -9,6 +9,7 @@ type Container = {
   project: string
   service: string
   image?: string
+  imageTags?: string[]
   state: string
   health?: string
   updateAvailable?: boolean
@@ -136,10 +137,17 @@ function ProjectCard({ project }: { project: Project }) {
       {project.containers.map((container) => {
         const status = container.health || container.state
         const tone = status === 'healthy' || status === 'running' ? 'ok' : status === 'starting' || status === 'created' ? 'pending' : 'bad'
+        const imageTags = container.imageTags ?? []
         return <div className="container-row" key={container.id}>
           <span className={`container-indicator ${tone}`} />
           <span className="container-name" title={container.name}>{container.service || container.name}</span>
-          <span className="container-image" title={container.image || 'Image not reported'}>{container.image || 'Image not reported'}</span>
+          <div className="container-image-group">
+            <span className="container-image" title={container.image || 'Image not reported'}>{container.image || 'Image not reported'}</span>
+            {imageTags.length > 0 && <details className="container-image-tags">
+              <summary title="Show every local tag attached to this image">{imageTags.length} {imageTags.length === 1 ? 'tag' : 'tags'}</summary>
+              <ul>{imageTags.map((tag) => <li key={tag}>{tag}</li>)}</ul>
+            </details>}
+          </div>
           <span className={`container-state ${status}`}>
             {container.updateAvailable && <span className="update-pill container-update-pill">Update available</span>}
             <span>{status}</span>

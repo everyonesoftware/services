@@ -1,8 +1,10 @@
 package dockerapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -17,7 +19,7 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 			if r.URL.Query().Get("digests") != "1" {
 				t.Errorf("images query = %q, want digests=1", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`[{"Id":"sha256:image","RepoDigests":["jellyfin/jellyfin@sha256:manifest"]}]`))
+			_, _ = w.Write([]byte(`[{"Id":"sha256:image","RepoDigests":["jellyfin/jellyfin@sha256:manifest"],"RepoTags":["jellyfin/jellyfin:latest","<none>:<none>","jellyfin/jellyfin:10"]},{"Id":"sha256:other","RepoTags":["nginx:latest"]}]`))
 		case "/v1.47/containers/abc/json":
 			_, _ = w.Write([]byte(`{"Config":{"Image":"nginx:latest"},"State":{"Status":"running","Health":{"Status":"healthy"}}}`))
 		default:
@@ -43,5 +45,19 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 	}
 	if len(got.RepoDigests) != 1 || got.RepoDigests[0] != "jellyfin/jellyfin@sha256:manifest" {
 		t.Fatalf("container repo digests = %v, want the running image's repository digest", got.RepoDigests)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal container: %v", err)
+	}
+	var payload struct {
+		ImageTags []string `json:"imageTags"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode image tags: %v", err)
+	}
+	wantTags := []string{"jellyfin/jellyfin:10", "jellyfin/jellyfin:latest"}
+	if !reflect.DeepEqual(payload.ImageTags, wantTags) {
+		t.Fatalf("container image tags = %v, want %v", payload.ImageTags, wantTags)
 	}
 }

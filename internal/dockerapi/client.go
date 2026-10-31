@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"services/internal/groups"
@@ -49,6 +50,7 @@ type containerSummary struct {
 type imageSummary struct {
 	ID          string   `json:"Id"`
 	RepoDigests []string `json:"RepoDigests"`
+	RepoTags    []string `json:"RepoTags"`
 }
 
 type containerInspect struct {
@@ -75,9 +77,16 @@ func (c *Client) Containers() ([]groups.Container, error) {
 	}
 	var images []imageSummary
 	imageDigests := make(map[string][]string)
+	imageTags := make(map[string][]string)
 	if err := c.get(prefix+"/images/json?all=1&digests=1", &images); err == nil {
 		for _, image := range images {
 			imageDigests[image.ID] = image.RepoDigests
+			for _, tag := range image.RepoTags {
+				if tag != "" && tag != "<none>:<none>" {
+					imageTags[image.ID] = append(imageTags[image.ID], tag)
+				}
+			}
+			sort.Strings(imageTags[image.ID])
 		}
 	}
 
@@ -94,6 +103,7 @@ func (c *Client) Containers() ([]groups.Container, error) {
 			Project:     summary.Labels[composeProjectLabel],
 			Service:     summary.Labels[composeServiceLabel],
 			Image:       summary.Image,
+			ImageTags:   imageTags[summary.ImageID],
 			State:       state,
 			RepoDigests: imageDigests[summary.ImageID],
 		}
