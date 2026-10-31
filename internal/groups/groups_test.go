@@ -13,11 +13,21 @@ func TestAggregateComposeGroupsByProjectAndHealth(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("Aggregate() returned %d groups, want 2", len(got))
 	}
-	if got[0].Name != "blog" || got[0].Status != StatusUnverified {
-		t.Errorf("first group = (%q, %q), want (blog, %q)", got[0].Name, got[0].Status, StatusUnverified)
+	if got[0].Name != "blog" || got[0].Status != Status("running") {
+		t.Errorf("first group = (%q, %q), want (blog, running)", got[0].Name, got[0].Status)
 	}
 	if got[1].Name != "shop" || got[1].Status != StatusHealthy || len(got[1].Containers) != 2 {
 		t.Errorf("second group = %+v, want healthy shop group with 2 containers", got[1])
+	}
+}
+
+func TestAggregateMarksProjectHealthyWhenCheckedContainersPass(t *testing.T) {
+	got := Aggregate([]Container{
+		{Project: "media", Service: "app", State: "running", Health: "healthy"},
+		{Project: "media", Service: "worker", State: "running"},
+	})
+	if len(got) != 1 || got[0].Status != StatusHealthy {
+		t.Fatalf("Aggregate() = %+v, want one healthy media group", got)
 	}
 }
 

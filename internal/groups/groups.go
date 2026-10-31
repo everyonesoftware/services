@@ -6,10 +6,10 @@ import "sort"
 type Status string
 
 const (
-	StatusHealthy    Status = "healthy"
-	StatusStarting   Status = "starting"
-	StatusUnhealthy  Status = "unhealthy"
-	StatusUnverified Status = "running-unverified"
+	StatusHealthy   Status = "healthy"
+	StatusRunning   Status = "running"
+	StatusStarting  Status = "starting"
+	StatusUnhealthy Status = "unhealthy"
 )
 
 // Container is the subset of Docker container data needed for project health.
@@ -54,30 +54,38 @@ func Aggregate(containers []Container) []Project {
 }
 
 func projectStatus(containers []Container) Status {
-	status := StatusHealthy
+	hasHealthCheck := false
+	starting := false
 	for _, container := range containers {
 		if container.State != "running" {
 			if container.State == "created" {
-				if status != StatusUnhealthy {
-					status = StatusStarting
-				}
+				starting = true
 				continue
 			}
 			return StatusUnhealthy
 		}
 		switch container.Health {
+		case "healthy":
+			hasHealthCheck = true
 		case "unhealthy":
 			return StatusUnhealthy
 		case "starting":
-			if status != StatusUnhealthy {
-				status = StatusStarting
-			}
+			hasHealthCheck = true
+			starting = true
 		case "":
-			if status == StatusHealthy {
-				status = StatusUnverified
-			}
+			// No configured Docker health check.
+		default:
+			// Do not report an unknown health state as healthy.
+			hasHealthCheck = true
+			starting = true
 		}
 	}
-	return status
+	if starting {
+		return StatusStarting
+	}
+	if hasHealthCheck {
+		return StatusHealthy
+	}
+	return StatusRunning
 }
 

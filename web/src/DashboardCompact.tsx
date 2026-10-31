@@ -60,7 +60,7 @@ export default function DashboardCompact() {
   }, [])
 
   const unhealthy = projects.filter((project) => project.status === 'unhealthy').length
-  const attention = projects.filter((project) => project.status === 'starting' || project.status === 'running-unverified').length
+  const attention = projects.filter((project) => project.status === 'starting').length
   const containerCount = projects.reduce((total, project) => total + project.containers.length, 0)
   const needsAttention = unhealthy + attention
 
@@ -112,7 +112,8 @@ function SummaryMetric({ label, value, tone = '' }: { label: string; value: numb
 }
 
 function ProjectCard({ project }: { project: Project }) {
-  const label = project.status === 'running-unverified' ? 'No health checks' : project.status
+  const labels: Record<string, string> = { healthy: 'Healthy', running: 'Running', starting: 'Starting', unhealthy: 'Unhealthy' }
+  const label = labels[project.status] ?? project.status
   const icon = iconForProject(project)
   return <details className="project-card">
     <summary className="project-top">

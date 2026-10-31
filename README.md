@@ -8,7 +8,7 @@ Services is a Compose-first dashboard for monitoring the current health of Compo
 - Aggregates project health from each container's running state and configured Docker health check.
 - Refreshes the dashboard every 30 seconds.
 - Uses Docker Engine API discovery only; it does not change containers or Compose files.
-- Compose projects with no configured health checks are shown as **running-unverified**.
+- Compose projects with no configured health checks are shown as **Running**; projects with configured checks that pass are shown as **Healthy**.
 - Unlabelled, non-Compose containers are not shown.
 
 Update detection (Docker Hub/GHCR), settings, notifications, and update approval are not implemented yet.
