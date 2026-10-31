@@ -114,8 +114,8 @@ function SummaryMetric({ label, value, tone = '' }: { label: string; value: numb
 function ProjectCard({ project }: { project: Project }) {
   const label = project.status === 'running-unverified' ? 'No health checks' : project.status
   const icon = iconForProject(project)
-  return <article className="project-card">
-    <div className="project-top">
+  return <details className="project-card">
+    <summary className="project-top">
       <div className="project-identity">
         <span className="project-icon" title={icon ? `${icon.title} logo, identified from a running image` : 'Compose project'} aria-label={icon ? `${icon.title} logo` : 'Compose project icon'}>
           {icon ? <svg viewBox="0 0 24 24" aria-hidden="true"><path fill={`#${icon.hex}`} d={icon.path} /></svg> : <span aria-hidden="true">▦</span>}
@@ -123,7 +123,7 @@ function ProjectCard({ project }: { project: Project }) {
         <div><h3>{project.name}</h3><span className="service-count">{project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span></div>
       </div>
       <span className={`status-pill ${project.status}`}><i />{label}</span>
-    </div>
+    </summary>
     <div className="container-list">
       {project.containers.map((container) => {
         const status = container.health || container.state
@@ -136,5 +136,5 @@ function ProjectCard({ project }: { project: Project }) {
         </div>
       })}
     </div>
-  </article>
+  </details>
 }
