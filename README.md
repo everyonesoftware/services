@@ -19,7 +19,7 @@ Update detection (Docker Hub/GHCR), settings, notifications, and update approval
 
 ## Version number
 
-The displayed version is the number of Git commits reachable from the build's `HEAD`. CI checks out full history, calculates that integer, injects it into the app, and uses it as an additional GHCR tag. For a local Docker Desktop build in PowerShell, calculate the same value before starting Compose:
+The displayed version is the number of Git commits reachable from the build's `HEAD`. CI checks out full history, calculates that integer, injects it into the app, and uses it as an additional GHCR tag. Compose defaults the image tag to `latest`; its build argument still defaults to integer `0` unless `APP_VERSION` is supplied. For a local Docker Desktop build in PowerShell, calculate the commit count so the dashboard version and image tag match:
 
 ```powershell
 $env:APP_VERSION = (git rev-list --count HEAD).Trim()
@@ -28,9 +28,10 @@ docker compose up --build -d
 
 ## Run with Docker Desktop
 
-From this project directory:
+From this project directory in PowerShell (sets the image tag and dashboard version to the current commit count):
 
-```sh
+```powershell
+$env:APP_VERSION = (git rev-list --count HEAD).Trim()
 docker compose up --build -d
 ```
 
