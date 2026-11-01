@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"sync"
 	"strconv"
 	"strings"
 	"time"
 
+	"services/internal/composeupdate"
 	"services/internal/groups"
 )
 
@@ -21,6 +23,10 @@ type ContainerSource interface {
 
 type UpdateApplier interface {
 	Apply([]groups.Container)
+}
+
+type ImmediateUpdateChecker interface {
+	CheckNow(context.Context, []groups.Container) error
 }
 
 type ServiceUpdater interface {
@@ -84,6 +90,7 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 	}
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/projects", s.projects)
+	s.mux.HandleFunc("POST /api/updates/check", s.checkUpdates)
 	s.mux.HandleFunc("GET /api/version", s.versionInfo)
 	s.mux.HandleFunc("POST /api/containers/{id}/pull", s.pullContainer)
 	s.mux.HandleFunc("POST /api/containers/{id}/update", s.updateContainer)
@@ -93,6 +100,31 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) checkUpdates(w http.ResponseWriter, r *http.Request) {
+	if !s.sameOriginAllowed(r) {
+		http.Error(w, "Cross-origin action rejected", http.StatusForbidden)
+		return
+	}
+	checker, ok := s.updates.(ImmediateUpdateChecker)
+	if !ok {
+		http.Error(w, "Update checks are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	containers, err := s.source.Containers()
+	if err != nil {
+		http.Error(w, "Docker engine unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	if err := checker.CheckNow(ctx, containers); err != nil {
+		http.Error(w, "One or more registry checks failed", http.StatusBadGateway)
+		return
+	}
+	s.updates.Apply(containers)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) versionInfo(w http.ResponseWriter, _ *http.Request) {
@@ -158,8 +190,21 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("X-Accel-Buffering", "no")
+	encoder := json.NewEncoder(w)
+	var streamMu sync.Mutex
+	progress := func(message string) {
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		_ = encoder.Encode(map[string]string{"type": "progress", "message": message})
+		if flusher, ok := w.(http.Flusher); ok { flusher.Flush() }
+	}
+	progress("Starting Compose " + action + " for " + selected.Project + "/" + selected.Service)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	ctx = composeupdate.WithProgress(ctx, composeupdate.ProgressFunc(progress))
 	if action == "pull" {
 		err = s.updater.Pull(ctx, *selected)
 	} else {
@@ -167,10 +212,10 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 	}
 	if err != nil {
 		log.Printf("Compose %s failed for project %q service %q: %v", action, selected.Project, selected.Service, err)
-		http.Error(w, "Compose operation failed; the service may be unchanged", http.StatusBadGateway)
+		progress("ERROR: " + err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	progress("Compose " + action + " completed successfully")
 }
 
 func (s *Server) sameOriginAllowed(r *http.Request) bool {

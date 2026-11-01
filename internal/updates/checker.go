@@ -101,6 +101,30 @@ func (c *Checker) Apply(containers []groups.Container) {
 	}
 }
 
+// CheckNow refreshes every distinct running Compose image before returning.
+func (c *Checker) CheckNow(ctx context.Context, containers []groups.Container) error {
+	seen := make(map[string]struct{})
+	var firstErr error
+	for _, container := range containers {
+		if container.Project == "" || container.State != "running" {
+			continue
+		}
+		ref, err := parseReference(container.Image)
+		if err != nil {
+			continue
+		}
+		key := ref.key()
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if err := c.checkNow(ctx, key); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (c *Checker) Run(ctx context.Context, source ContainerSource) {
 	poll := func() {
 		containers, err := source.Containers()

@@ -2,6 +2,7 @@ package composeupdate
 
 import (
 	"context"
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -11,12 +12,25 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"log"
 
 	"services/internal/groups"
 )
 
 type Runner interface {
 	Run(context.Context, string, []string) error
+}
+
+type progressKey struct{}
+type ProgressFunc func(string)
+
+func WithProgress(ctx context.Context, progress ProgressFunc) context.Context {
+	return context.WithValue(ctx, progressKey{}, progress)
+}
+
+func reportProgress(ctx context.Context, line string) {
+	log.Printf("Compose progress: %s", line)
+	if progress, ok := ctx.Value(progressKey{}).(ProgressFunc); ok && progress != nil { progress(line) }
 }
 
 type Updater struct {
@@ -313,14 +327,29 @@ func (r execRunner) Run(ctx context.Context, workingDir string, composeArgs []st
 	}
 	args := []string{"--host", "unix://" + r.dockerSocket, "compose"}
 	args = append(args, composeArgs...)
+	reportProgress(ctx, "Running: docker "+strings.Join(args, " "))
 	command := exec.CommandContext(ctx, "docker", args...)
 	command.Dir = workingDir
 	command.Env = composeEnvironment(os.Environ())
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("docker compose command failed: %w", err)
+	stdout, err := command.StdoutPipe()
+	if err != nil { return fmt.Errorf("capture docker compose output: %w", err) }
+	stderr, err := command.StderrPipe()
+	if err != nil { return fmt.Errorf("capture docker compose errors: %w", err) }
+	if err := command.Start(); err != nil { return fmt.Errorf("docker compose command failed: %w", err) }
+	var output sync.WaitGroup
+	stream := func(reader io.Reader, label string) {
+		defer output.Done()
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 4096), 1024*1024)
+		for scanner.Scan() { reportProgress(ctx, label+": "+scanner.Text()) }
+		if err := scanner.Err(); err != nil { reportProgress(ctx, "Output read error: "+err.Error()) }
 	}
+	output.Add(2)
+	go stream(stdout, "stdout")
+	go stream(stderr, "stderr")
+	runErr := command.Wait()
+	output.Wait()
+	if runErr != nil { return fmt.Errorf("docker compose command failed: %w", runErr) }
 	return nil
 }
 

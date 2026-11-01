@@ -60,6 +60,7 @@ button.update-pill:focus-visible,.dialog-button:focus-visible{outline:2px solid 
 .update-comparison-arrow{align-self:center;justify-self:center;color:#7a8ca3;font-size:17px}
 .update-dialog-message{margin:12px 0 0;padding:8px 10px;border:1px solid #603638;border-radius:5px;background:#261a1e;color:#f0a3a0;font-size:10px;line-height:1.45;overflow-wrap:anywhere}
 .update-dialog-message.success{border-color:#315c49;background:#14251e;color:#85d9ad}
+.operation-log{margin-top:12px;border:1px solid #2a3646;border-radius:6px;background:#10161f;color:#aebbd0;font-size:10px}.operation-log summary{padding:8px 10px;cursor:pointer;font-weight:600}.operation-log summary span{color:#e4c36f}.operation-log pre{max-height:190px;overflow:auto;margin:0;padding:8px 10px;border-top:1px solid #283240;color:#bdcbe0;font:9px/1.5 'IBM Plex Mono',monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .update-dialog-message.pending{border-color:#4d472f;background:#211e14;color:#e4c36f}
 .update-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;padding-top:13px;border-top:1px solid #283240}
 .dialog-button{min-width:72px;padding:7px 12px;border:1px solid #3a4657;border-radius:5px;background:#1a2330;color:#d4deeb;font-family:inherit;font-size:10px;font-weight:600;cursor:pointer}

@@ -29,6 +29,24 @@ export default function DashboardCompact() {
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
   const [updateTarget, setUpdateTarget] = useState<Container | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const [updateCheckMessage, setUpdateCheckMessage] = useState('')
+
+  const checkUpdates = async () => {
+    if (checkingUpdates) return
+    setCheckingUpdates(true)
+    setUpdateCheckMessage('')
+    try {
+      const response = await fetch('/api/updates/check', { method: 'POST' })
+      if (!response.ok) throw new Error((await response.text()).trim() || `Check failed (${response.status})`)
+      setUpdateCheckMessage('Container image checks complete.')
+      setRefreshKey((value) => value + 1)
+    } catch (cause) {
+      setUpdateCheckMessage(cause instanceof Error ? cause.message : 'Could not check container images.')
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -90,8 +108,10 @@ export default function DashboardCompact() {
       <div className="content-wrap">
         <div className="page-heading">
           <div><div className="eyebrow">DOCKER COMPOSE</div><h1>Projects</h1></div>
-          <span className="refresh-note">↻ &nbsp;Refreshes every 30 seconds</span>
+          <div className="heading-actions"><span className="refresh-note">↻ &nbsp;Refreshes every 30 seconds</span><button className="dialog-button secondary" type="button" onClick={() => void checkUpdates()} disabled={checkingUpdates}>{checkingUpdates ? 'Checking…' : 'Check for updates'}</button></div>
         </div>
+
+        {updateCheckMessage && <p className="update-check-message" role={updateCheckMessage.includes('complete') ? 'status' : 'alert'}>{updateCheckMessage}</p>}
 
         {error && <div className="alert"><span className="alert-icon">!</span><div><strong>Unable to reach Docker</strong><p>{error}. Check the Docker socket mount and restart Services.</p></div></div>}
 
@@ -187,6 +207,7 @@ function UpdateDialog({
   const [busy, setBusy] = useState<'pull' | 'update' | null>(null)
   const [message, setMessage] = useState('')
   const [pulled, setPulled] = useState(false)
+  const [operationLog, setOperationLog] = useState<string[]>([])
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -204,12 +225,32 @@ function UpdateDialog({
     let updated = false
     setBusy(action)
     setMessage('')
+    setOperationLog([])
     try {
       const response = await fetch(`/api/containers/${encodeURIComponent(container.id)}/${action}`, { method: 'POST' })
       if (!response.ok) {
         const detail = (await response.text()).trim()
         throw new Error(detail || `Request failed (${response.status})`)
       }
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('Progress stream unavailable')
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let operationError = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        buffer += decoder.decode(value, { stream: !done })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const event = JSON.parse(line) as { type: string; message: string }
+          setOperationLog((current) => [...current, event.message])
+          if (event.message.startsWith('ERROR: ')) operationError = event.message.slice(7)
+        }
+        if (done) break
+      }
+      if (operationError) throw new Error(operationError)
       if (action === 'pull') {
         setPulled(true)
         setMessage('Image pulled. The running container is unchanged. The digest above is from the last registry check; Update will pull the current tag again before recreating the service.')
@@ -262,6 +303,10 @@ function UpdateDialog({
         </section>
       </div>
       {message && <p className={`update-dialog-message ${busy ? 'pending' : message.startsWith('Image pulled') ? 'success' : 'error'}`} role={message.startsWith('Image pulled') ? 'status' : 'alert'}>{message}</p>}
+      <details className="operation-log" open={busy !== null}>
+        <summary>Operation log {busy && <span>· running</span>}</summary>
+        <pre aria-live="polite">{operationLog.length ? operationLog.join('\n') : 'Command output will appear here.'}</pre>
+      </details>
       <div className="update-dialog-actions">
         <button type="button" className="dialog-button secondary" onClick={dismiss} disabled={busy !== null}>Cancel</button>
         <button type="button" className="dialog-button secondary" onClick={() => void runAction('pull')} disabled={busy !== null}>

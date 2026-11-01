@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"services/internal/groups"
@@ -75,8 +76,8 @@ func TestPullEndpointPullsTheSelectedUpdatedContainerAndReturnsSuccess(t *testin
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)
 
-	if response.Code != 204 || !reflect.DeepEqual(updater.pulls, []string{"abc"}) {
-		t.Fatalf("pull response = %d, calls = %v, want 204 and [abc]", response.Code, updater.pulls)
+	if response.Code != 200 || !reflect.DeepEqual(updater.pulls, []string{"abc"}) || !strings.Contains(response.Body.String(), `"Compose pull completed successfully"`) {
+		t.Fatalf("pull response = %d, calls = %v, body = %s, want progress stream and [abc]", response.Code, updater.pulls, response.Body.String())
 	}
 }
 
@@ -89,8 +90,8 @@ func TestUpdateEndpointRequiresSameOriginAndLeavesFailuresVisible(t *testing.T) 
 	request.Header.Set("Origin", "http://dashboard.test")
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)
-	if response.Code != 502 || !reflect.DeepEqual(updater.updates, []string{"abc"}) {
-		t.Fatalf("update response = %d, calls = %v, want 502 and [abc]", response.Code, updater.updates)
+	if response.Code != 200 || !reflect.DeepEqual(updater.updates, []string{"abc"}) || !strings.Contains(response.Body.String(), `"ERROR: compose failed"`) {
+		t.Fatalf("update response = %d, calls = %v, body = %s, want streamed error and [abc]", response.Code, updater.updates, response.Body.String())
 	}
 
 	request = httptest.NewRequest("POST", "http://dashboard.test/api/containers/abc/update", nil)
@@ -147,8 +148,8 @@ func TestUpdateEndpointAllowsApplyingAnAlreadyPulledImage(t *testing.T) {
 	request.Header.Set("Origin", "http://dashboard.test")
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)
-	if response.Code != 204 || !reflect.DeepEqual(updater.updates, []string{"abc"}) {
-		t.Fatalf("update response = %d, calls = %v, want 204 and [abc]", response.Code, updater.updates)
+	if response.Code != 200 || !reflect.DeepEqual(updater.updates, []string{"abc"}) || !strings.Contains(response.Body.String(), `"Compose update completed successfully"`) {
+		t.Fatalf("update response = %d, calls = %v, body = %s, want progress stream and [abc]", response.Code, updater.updates, response.Body.String())
 	}
 }
 
@@ -236,8 +237,8 @@ func TestPublicOriginAllowsTlsTerminatedProxyRequests(t *testing.T) {
 			response := httptest.NewRecorder()
 			server.ServeHTTP(response, request)
 
-			if response.Code != 204 || !reflect.DeepEqual(updater.updates, []string{"abc"}) {
-				t.Fatalf("proxy update response = %d, calls = %v, want 204 and [abc]", response.Code, updater.updates)
+			if response.Code != 200 || !reflect.DeepEqual(updater.updates, []string{"abc"}) || !strings.Contains(response.Body.String(), `"Compose update completed successfully"`) {
+				t.Fatalf("proxy update response = %d, calls = %v, body = %s, want progress stream and [abc]", response.Code, updater.updates, response.Body.String())
 			}
 		})
 	}
