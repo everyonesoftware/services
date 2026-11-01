@@ -153,7 +153,7 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		http.Error(w, "Container not found", http.StatusNotFound)
 		return
 	}
-	if selected.State != "running" || !selected.UpdateAvailable {
+	if selected.State != "running" || (action == "pull" && !selected.UpdateAvailable) {
 		http.Error(w, "Container has no available update", http.StatusConflict)
 		return
 	}

@@ -138,6 +138,20 @@ func TestPullEndpointRejectsContainersWithoutAnAvailableUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateEndpointAllowsApplyingAnAlreadyPulledImage(t *testing.T) {
+	updater := &fakeServiceUpdater{}
+	server := NewWithActionsAndAllowedHosts(fakeSource{containers: []groups.Container{{
+		ID: "abc", Name: "api-1", Project: "store", Service: "api", State: "running",
+	}}}, nil, updater, 42, []string{"dashboard.test"})
+	request := httptest.NewRequest("POST", "http://dashboard.test/api/containers/abc/update", nil)
+	request.Header.Set("Origin", "http://dashboard.test")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != 204 || !reflect.DeepEqual(updater.updates, []string{"abc"}) {
+		t.Fatalf("update response = %d, calls = %v, want 204 and [abc]", response.Code, updater.updates)
+	}
+}
+
 func TestSameOriginValidatesCanonicalAuthority(t *testing.T) {
 	cases := []struct {
 		name        string
