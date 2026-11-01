@@ -163,7 +163,7 @@ function ProjectCard({ project, onOpenUpdate, onUpdateAll }: { project: Project;
         <div><h3>{project.name}</h3><span className="service-count">{project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span></div>
       </div>
       <div className="project-status-group">
-        {updateCount > 0 && <span className="project-update-count" title="Use a container's update button to review that service">{updateCount} update{updateCount === 1 ? '' : 's'}</span>}
+        {updateCount > 0 && <span className="update-pill project-update-count">{updateCount} Updates</span>}
         <span className={`status-pill ${project.status}`}><i />{label}</span>
       </div>
     </summary>
