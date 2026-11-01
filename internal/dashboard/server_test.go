@@ -205,3 +205,64 @@ func TestAllowedOriginHostAcceptsExplicitHostname(t *testing.T) {
 		t.Fatal("unconfigured hostname should not be allowed")
 	}
 }
+
+func TestPublicOriginAllowsTlsTerminatedProxyRequests(t *testing.T) {
+	for _, requestHost := range []string{"127.0.0.1:8080", "services.tail1a7c8f.ts.net"} {
+		t.Run(requestHost, func(t *testing.T) {
+			updater := &fakeServiceUpdater{}
+			server, err := NewWithActionsAndPublicOrigin(fakeSource{containers: []groups.Container{{
+				ID: "abc", Name: "api-1", Project: "store", Service: "api", State: "running",
+			}}}, fakeUpdateApplier{}, updater, 42, nil, "https://services.tail1a7c8f.ts.net")
+			if err != nil {
+				t.Fatalf("construct server: %v", err)
+			}
+			request := httptest.NewRequest("POST", "http://"+requestHost+"/api/containers/abc/update", nil)
+			request.Header.Set("Origin", "https://services.tail1a7c8f.ts.net")
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, request)
+
+			if response.Code != 204 || !reflect.DeepEqual(updater.updates, []string{"abc"}) {
+				t.Fatalf("proxy update response = %d, calls = %v, want 204 and [abc]", response.Code, updater.updates)
+			}
+		})
+	}
+}
+
+func TestPublicOriginRejectsMismatchedOriginsAndHosts(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		requestHost string
+		origin      string
+	}{
+		{name: "cross-origin", requestHost: "127.0.0.1:8080", origin: "https://attacker.example"},
+		{name: "untrusted host", requestHost: "attacker.example", origin: "https://services.tail1a7c8f.ts.net"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			updater := &fakeServiceUpdater{}
+			server, err := NewWithActionsAndPublicOrigin(fakeSource{containers: []groups.Container{{
+				ID: "abc", Name: "api-1", Project: "store", Service: "api", State: "running",
+			}}}, fakeUpdateApplier{}, updater, 42, nil, "https://services.tail1a7c8f.ts.net")
+			if err != nil {
+				t.Fatalf("construct server: %v", err)
+			}
+			request := httptest.NewRequest("POST", "http://"+testCase.requestHost+"/api/containers/abc/update", nil)
+			request.Header.Set("Origin", testCase.origin)
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, request)
+
+			if response.Code != 403 || len(updater.updates) != 0 {
+				t.Fatalf("request response = %d, calls = %v, want 403 and no calls", response.Code, updater.updates)
+			}
+		})
+	}
+}
+
+func TestPublicOriginMustBeAnOriginOnlyUrl(t *testing.T) {
+	for _, origin := range []string{"https://services.tail1a7c8f.ts.net/", "https://user@services.tail1a7c8f.ts.net", "https://services.tail1a7c8f.ts.net/path"} {
+		if _, err := NewWithActionsAndPublicOrigin(fakeSource{}, nil, nil, 42, nil, origin); err == nil {
+			t.Errorf("constructor accepted non-origin URL %q", origin)
+		}
+	}
+}

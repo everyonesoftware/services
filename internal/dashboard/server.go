@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/netip"
@@ -27,11 +28,18 @@ type ServiceUpdater interface {
 	Update(context.Context, groups.Container) error
 }
 
+type originAuthority struct {
+	scheme string
+	host   string
+	port   string
+}
+
 type Server struct {
 	source       ContainerSource
 	updates      UpdateApplier
 	updater      ServiceUpdater
 	allowedHosts map[string]struct{}
+	publicOrigin *originAuthority
 	version      int
 	mux          *http.ServeMux
 }
@@ -49,13 +57,32 @@ func NewWithActions(source ContainerSource, updates UpdateApplier, updater Servi
 }
 
 func NewWithActionsAndAllowedHosts(source ContainerSource, updates UpdateApplier, updater ServiceUpdater, version int, allowedHosts []string) *Server {
+	return newWithActionsAndOrigin(source, updates, updater, version, allowedHosts, nil)
+}
+
+func NewWithActionsAndPublicOrigin(source ContainerSource, updates UpdateApplier, updater ServiceUpdater, version int, allowedHosts []string, publicOrigin string) (*Server, error) {
+	var configuredOrigin *originAuthority
+	if publicOrigin != "" {
+		parsed, ok := parseOriginAuthority(publicOrigin)
+		if !ok {
+			return nil, fmt.Errorf("SERVICES_PUBLIC_ORIGIN must be an absolute http or https origin without a path, query, or fragment")
+		}
+		configuredOrigin = &parsed
+	}
+	return newWithActionsAndOrigin(source, updates, updater, version, allowedHosts, configuredOrigin), nil
+}
+
+func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, updater ServiceUpdater, version int, allowedHosts []string, publicOrigin *originAuthority) *Server {
 	allowed := make(map[string]struct{}, len(allowedHosts))
 	for _, host := range allowedHosts {
 		if normalized := normalizeAllowedHost(host); normalized != "" {
 			allowed[normalized] = struct{}{}
 		}
 	}
-	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, version: version, mux: http.NewServeMux()}
+	if publicOrigin != nil {
+		allowed[publicOrigin.host] = struct{}{}
+	}
+	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/projects", s.projects)
 	s.mux.HandleFunc("GET /api/version", s.versionInfo)
 	s.mux.HandleFunc("POST /api/containers/{id}/pull", s.pullContainer)
@@ -147,7 +174,12 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 }
 
 func (s *Server) sameOriginAllowed(r *http.Request) bool {
-	if !sameOrigin(r) {
+	if s.publicOrigin != nil {
+		origin, ok := requestOrigin(r)
+		if !ok || origin != *s.publicOrigin {
+			return false
+		}
+	} else if !sameOrigin(r) {
 		return false
 	}
 	scheme := "http"
@@ -200,30 +232,46 @@ var (
 )
 
 func sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" || len(r.Header.Values("Origin")) != 1 {
-		return false
-	}
-	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Scheme == "" || parsed.Opaque != "" || parsed.Host == "" || parsed.Path != "" || parsed.RawPath != "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawFragment != "" {
+	origin, ok := requestOrigin(r)
+	if !ok {
 		return false
 	}
 	expectedScheme := "http"
 	if r.TLS != nil {
 		expectedScheme = "https"
 	}
-	if !strings.EqualFold(parsed.Scheme, expectedScheme) {
-		return false
-	}
-	if fetchSite := r.Header.Get("Sec-Fetch-Site"); fetchSite != "" && !strings.EqualFold(fetchSite, "same-origin") {
-		return false
-	}
-	originHost, originPort, ok := normalizedAuthority(parsed.Host, expectedScheme)
-	if !ok {
+	if origin.scheme != expectedScheme {
 		return false
 	}
 	requestHost, requestPort, ok := normalizedAuthority(r.Host, expectedScheme)
-	return ok && originHost == requestHost && originPort == requestPort
+	return ok && origin.host == requestHost && origin.port == requestPort
+}
+
+func requestOrigin(r *http.Request) (originAuthority, bool) {
+	values := r.Header.Values("Origin")
+	if len(values) != 1 {
+		return originAuthority{}, false
+	}
+	if fetchSite := r.Header.Get("Sec-Fetch-Site"); fetchSite != "" && !strings.EqualFold(fetchSite, "same-origin") {
+		return originAuthority{}, false
+	}
+	return parseOriginAuthority(values[0])
+}
+
+func parseOriginAuthority(value string) (originAuthority, bool) {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Opaque != "" || parsed.Host == "" || parsed.Path != "" || parsed.RawPath != "" || parsed.User != nil || parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawFragment != "" {
+		return originAuthority{}, false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return originAuthority{}, false
+	}
+	host, port, ok := normalizedAuthority(parsed.Host, scheme)
+	if !ok {
+		return originAuthority{}, false
+	}
+	return originAuthority{scheme: scheme, host: host, port: port}, true
 }
 
 func normalizedAuthority(authority, scheme string) (string, string, bool) {

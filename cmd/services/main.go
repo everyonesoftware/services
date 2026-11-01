@@ -38,10 +38,14 @@ func main() {
 		socket,
 	)
 	allowedHosts := strings.Split(os.Getenv("SERVICES_ALLOWED_HOSTS"), ",")
+	handler, err := dashboard.NewWithActionsAndPublicOrigin(source, checker, composeUpdater, version, allowedHosts, os.Getenv("SERVICES_PUBLIC_ORIGIN"))
+	if err != nil {
+		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
+	}
 	go checker.Run(context.Background(), source)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           dashboard.NewWithActionsAndAllowedHosts(source, checker, composeUpdater, version, allowedHosts),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("Services listening on %s", addr)
