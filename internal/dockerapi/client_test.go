@@ -14,12 +14,12 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 		case "/version":
 			_, _ = w.Write([]byte(`{"ApiVersion":"1.47"}`))
 		case "/v1.47/containers/json":
-			_, _ = w.Write([]byte(`[{"Id":"abc","Names":["/web-1"],"State":"running","Image":"jellyfin/jellyfin:latest","ImageID":"sha256:image","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web"}}]`))
+			_, _ = w.Write([]byte(`[{"Id":"abc","Names":["/web-1"],"State":"running","Image":"jellyfin/jellyfin:latest","ImageID":"sha256:image","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"E:/Containers/shop","com.docker.compose.project.config_files":"E:/Containers/shop/compose.yaml,E:/Containers/shop/override.yaml"}}]`))
 		case "/v1.47/images/json":
 			if r.URL.Query().Get("digests") != "1" {
 				t.Errorf("images query = %q, want digests=1", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`[{"Id":"sha256:image","RepoDigests":["jellyfin/jellyfin@sha256:manifest"],"RepoTags":["jellyfin/jellyfin:latest","<none>:<none>","jellyfin/jellyfin:10"]},{"Id":"sha256:other","RepoTags":["nginx:latest"]}]`))
+			_, _ = w.Write([]byte(`[{"Id":"sha256:image","RepoDigests":["jellyfin/jellyfin@sha256:manifest"]},{"Id":"sha256:other"}]`))
 		case "/v1.47/containers/abc/json":
 			_, _ = w.Write([]byte(`{"Config":{"Image":"nginx:latest"},"State":{"Status":"running","Health":{"Status":"healthy"}}}`))
 		default:
@@ -46,18 +46,18 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 	if len(got.RepoDigests) != 1 || got.RepoDigests[0] != "jellyfin/jellyfin@sha256:manifest" {
 		t.Fatalf("container repo digests = %v, want the running image's repository digest", got.RepoDigests)
 	}
+	if got.ComposeWorkingDir != "E:/Containers/shop" || !reflect.DeepEqual(got.ComposeConfigFiles, []string{"E:/Containers/shop/compose.yaml", "E:/Containers/shop/override.yaml"}) || got.ComposeConfigFilesLabel != "E:/Containers/shop/compose.yaml,E:/Containers/shop/override.yaml" {
+		t.Fatalf("Compose paths = (%q, %v), want the container's project metadata", got.ComposeWorkingDir, got.ComposeConfigFiles)
+	}
 	encoded, err := json.Marshal(got)
 	if err != nil {
 		t.Fatalf("marshal container: %v", err)
 	}
-	var payload struct {
-		ImageTags []string `json:"imageTags"`
-	}
+	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(encoded, &payload); err != nil {
-		t.Fatalf("decode image tags: %v", err)
+		t.Fatalf("decode container JSON: %v", err)
 	}
-	wantTags := []string{"jellyfin/jellyfin:10", "jellyfin/jellyfin:latest"}
-	if !reflect.DeepEqual(payload.ImageTags, wantTags) {
-		t.Fatalf("container image tags = %v, want %v", payload.ImageTags, wantTags)
+	if _, exists := payload["imageTags"]; exists {
+		t.Fatal("container API must not expose the removed local tag list")
 	}
 }

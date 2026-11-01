@@ -14,16 +14,20 @@ const (
 
 // Container is the Docker data needed for project health and image-update status.
 type Container struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Project         string   `json:"project"`
-	Service         string   `json:"service"`
-	Image           string   `json:"image"`
-	ImageTags       []string `json:"imageTags,omitempty"`
-	State           string   `json:"state"`
-	Health          string   `json:"health,omitempty"`
-	RepoDigests     []string `json:"-"`
-	UpdateAvailable bool     `json:"updateAvailable,omitempty"`
+	ID                      string   `json:"id"`
+	Name                    string   `json:"name"`
+	Project                 string   `json:"project"`
+	Service                 string   `json:"service"`
+	Image                   string   `json:"image"`
+	State                   string   `json:"state"`
+	Health                  string   `json:"health,omitempty"`
+	RepoDigests             []string `json:"-"`
+	ComposeWorkingDir       string   `json:"-"`
+	ComposeConfigFiles      []string `json:"-"`
+	ComposeConfigFilesLabel string   `json:"-"`
+	CurrentDigest           string   `json:"currentDigest,omitempty"`
+	ProposedDigest          string   `json:"proposedDigest,omitempty"`
+	UpdateAvailable         bool     `json:"updateAvailable,omitempty"`
 }
 
 // Project groups Compose containers under their Compose project label.

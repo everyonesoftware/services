@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.appVersion=${APP_VE
 
 # Minimal runtime image.
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && addgroup -S services && adduser -S -G services services
+RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose && docker compose version && addgroup -S services && adduser -S -G services services
 WORKDIR /app
 COPY --from=go-build /out/services /app/services
 COPY --from=web-build /src/web/dist /app/web/dist

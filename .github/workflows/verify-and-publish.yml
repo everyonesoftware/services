@@ -47,6 +47,10 @@ jobs:
         working-directory: web
         run: npm run test:updates
 
+      - name: Run frontend image reference tests
+        working-directory: web
+        run: npm run test:image-reference
+
       - name: Build frontend
         working-directory: web
         run: npm run build

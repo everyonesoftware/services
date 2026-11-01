@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { iconForProject } from './brandIcons.js'
+import { splitImageReference } from './imageReference.js'
 import { countAvailableUpdates } from './updateMetrics.js'
 import './dashboard-compact.css'
 
@@ -9,10 +10,11 @@ type Container = {
   project: string
   service: string
   image?: string
-  imageTags?: string[]
   state: string
   health?: string
   updateAvailable?: boolean
+  currentDigest?: string
+  proposedDigest?: string
 }
 type Project = { name: string; status: string; containers: Container[]; updateAvailable?: boolean }
 type VersionPayload = { version: number }
@@ -24,6 +26,8 @@ export default function DashboardCompact() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
+  const [updateTarget, setUpdateTarget] = useState<Container | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -48,7 +52,7 @@ export default function DashboardCompact() {
     void refresh()
     const timer = window.setInterval(refresh, 30_000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [])
+  }, [refreshKey])
 
   useEffect(() => {
     let active = true
@@ -104,11 +108,17 @@ export default function DashboardCompact() {
 
         {loading ? <div className="empty-state"><span className="spinner" /><p>Connecting to Docker Engine…</p></div>
           : projects.length === 0 && !error ? <div className="empty-state"><div className="empty-icon">▦</div><h3>No Compose projects found</h3><p>Projects appear here when Docker has discovered Compose containers.</p></div>
-            : <div className="project-list">{projects.map((project) => <ProjectCard key={project.name} project={project} />)}</div>}
+            : <div className="project-list">{projects.map((project) => <ProjectCard key={project.name} project={project} onOpenUpdate={setUpdateTarget} />)}</div>}
 
         <footer className="footer">Services <span>•</span> Docker Compose health monitor <span>•</span> {lastChecked ? 'Connected to local Engine' : 'Connecting'}</footer>
       </div>
     </section>
+    <UpdateDialog
+      key={updateTarget?.id ?? 'none'}
+      container={updateTarget}
+      onClose={() => setUpdateTarget(null)}
+      onUpdated={() => setRefreshKey((value) => value + 1)}
+    />
   </main>
 }
 
@@ -116,10 +126,11 @@ function SummaryMetric({ label, value, tone = '' }: { label: string; value: numb
   return <div className="summary-metric"><span className="summary-label">{label}</span><strong className={tone}>{value}</strong></div>
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, onOpenUpdate }: { project: Project; onOpenUpdate: (container: Container) => void }) {
   const labels: Record<string, string> = { healthy: 'Healthy', running: 'Running', starting: 'Starting', unhealthy: 'Unhealthy' }
   const label = labels[project.status] ?? project.status
   const icon = iconForProject(project)
+  const updateCount = project.containers.filter((container) => container.updateAvailable).length
   return <details className="project-card">
     <summary className="project-top">
       <div className="project-identity">
@@ -129,7 +140,7 @@ function ProjectCard({ project }: { project: Project }) {
         <div><h3>{project.name}</h3><span className="service-count">{project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span></div>
       </div>
       <div className="project-status-group">
-        {project.updateAvailable && <span className="update-pill">Update available</span>}
+        {updateCount > 0 && <span className="project-update-count" title="Use a container's update button to review that service">{updateCount} update{updateCount === 1 ? '' : 's'}</span>}
         <span className={`status-pill ${project.status}`}><i />{label}</span>
       </div>
     </summary>
@@ -137,23 +148,127 @@ function ProjectCard({ project }: { project: Project }) {
       {project.containers.map((container) => {
         const status = container.health || container.state
         const tone = status === 'healthy' || status === 'running' ? 'ok' : status === 'starting' || status === 'created' ? 'pending' : 'bad'
-        const imageTags = container.imageTags ?? []
+        const image = splitImageReference(container.image || '')
         return <div className="container-row" key={container.id}>
           <span className={`container-indicator ${tone}`} />
-          <span className="container-name" title={container.name}>{container.service || container.name}</span>
-          <div className="container-image-group">
-            <span className="container-image" title={container.image || 'Image not reported'}>{container.image || 'Image not reported'}</span>
-            {imageTags.length > 0 && <details className="container-image-tags">
-              <summary title="Show every local tag attached to this image">{imageTags.length} {imageTags.length === 1 ? 'tag' : 'tags'}</summary>
-              <ul>{imageTags.map((tag) => <li key={tag}>{tag}</li>)}</ul>
-            </details>}
+          <div className="container-name-cell">
+            <span className="container-name" title={container.name}>{container.name || container.service || 'Unnamed container'}</span>
+            {container.service && container.service !== container.name && <span className="container-service">{container.service}</span>}
           </div>
+          <span className="container-image" title={container.image || 'Image not reported'}>{image.image}</span>
+          <span className="container-tag" title={image.tag}>{image.tag}</span>
           <span className={`container-state ${status}`}>
-            {container.updateAvailable && <span className="update-pill container-update-pill">Update available</span>}
-            <span>{status}</span>
+            {container.updateAvailable && <button
+              type="button"
+              className="update-pill container-update-pill"
+              aria-label={`Review update for ${container.name || container.service}`}
+              onClick={() => onOpenUpdate(container)}
+            >Update available</button>}
+            <span>{container.state}</span>
+            {container.health && <span className="container-health">{container.health}</span>}
           </span>
         </div>
       })}
     </div>
   </details>
+}
+
+function UpdateDialog({
+  container,
+  onClose,
+  onUpdated,
+}: {
+  container: Container | null
+  onClose: () => void
+  onUpdated: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [busy, setBusy] = useState<'pull' | 'update' | null>(null)
+  const [message, setMessage] = useState('')
+  const [pulled, setPulled] = useState(false)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (container && !dialog.open) dialog.showModal()
+    if (!container && dialog.open) dialog.close()
+  }, [container])
+
+  const dismiss = () => {
+    if (!busy) onClose()
+  }
+
+  const runAction = async (action: 'pull' | 'update') => {
+    if (!container || busy) return
+    let updated = false
+    setBusy(action)
+    setMessage('')
+    try {
+      const response = await fetch(`/api/containers/${encodeURIComponent(container.id)}/${action}`, { method: 'POST' })
+      if (!response.ok) {
+        const detail = (await response.text()).trim()
+        throw new Error(detail || `Request failed (${response.status})`)
+      }
+      if (action === 'pull') {
+        setPulled(true)
+        setMessage('Image pulled. The running container is unchanged. The digest above is from the last registry check; Update will pull the current tag again before recreating the service.')
+      } else {
+        updated = true
+      }
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Could not complete the Compose operation.')
+    } finally {
+      setBusy(null)
+    }
+    if (updated) {
+      onUpdated()
+      onClose()
+    }
+  }
+
+  const image = splitImageReference(container?.image || '')
+  const currentState = container ? `${container.state}${container.health ? ` · ${container.health}` : ''}` : ''
+
+  return <dialog
+    ref={dialogRef}
+    className="update-dialog"
+    aria-labelledby="update-dialog-title"
+    onCancel={(event) => { event.preventDefault(); dismiss() }}
+    onClick={(event) => { if (event.target === event.currentTarget) dismiss() }}
+  >
+    {container && <div className="update-dialog-content">
+      <div className="update-dialog-heading">
+        <div><span className="eyebrow">IMAGE UPDATE</span><h2 id="update-dialog-title">Review update</h2></div>
+        <p>{container.name || container.service}</p>
+      </div>
+      <p className="update-dialog-copy">Pull downloads the image only. Update pulls the current tag again and recreates every replica of this Compose service using the current Compose files and .env values, without rebuilding or starting dependencies. Digests show the last registry check; mutable tags may move before Pull.</p>
+      <div className="update-comparison">
+        <section className="update-state-card current">
+          <span className="update-state-heading">CURRENT</span>
+          <div className="update-state-detail"><span>Image</span><code title={container.image}>{image.image}</code></div>
+          <div className="update-state-detail"><span>Tag</span><code title={image.tag}>{image.tag}</code></div>
+          <div className="update-state-detail"><span>Digest</span><code title={container.currentDigest}>{container.currentDigest || 'Not reported'}</code></div>
+          <div className="update-state-status"><span>State</span><strong>{currentState}</strong></div>
+        </section>
+        <span className="update-comparison-arrow" aria-hidden="true">→</span>
+        <section className="update-state-card proposed">
+          <span className="update-state-heading">PROPOSED</span>
+          <div className="update-state-detail"><span>Image</span><code title={container.image}>{image.image}</code></div>
+          <div className="update-state-detail"><span>Tag</span><code title={image.tag}>{image.tag}</code></div>
+          <div className="update-state-detail"><span>Digest</span><code title={container.proposedDigest}>{container.proposedDigest || 'New image'}</code></div>
+          <div className="update-state-status"><span>State</span><strong>{pulled ? 'Pulled · not applied' : 'Will run after update'}</strong></div>
+        </section>
+      </div>
+      {message && <p className={`update-dialog-message ${busy ? 'pending' : message.startsWith('Image pulled') ? 'success' : 'error'}`} role={message.startsWith('Image pulled') ? 'status' : 'alert'}>{message}</p>}
+      <div className="update-dialog-actions">
+        <button type="button" className="dialog-button secondary" onClick={dismiss} disabled={busy !== null}>Cancel</button>
+        <button type="button" className="dialog-button secondary" onClick={() => void runAction('pull')} disabled={busy !== null}>
+          {busy === 'pull' ? 'Pulling…' : 'Pull'}
+        </button>
+        <button type="button" className="dialog-button primary" onClick={() => void runAction('update')} disabled={busy !== null}>
+          {busy === 'update' ? 'Updating…' : 'Update'}
+        </button>
+      </div>
+    </div>}
+  </dialog>
 }

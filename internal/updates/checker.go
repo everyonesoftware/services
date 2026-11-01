@@ -66,6 +66,8 @@ func (c *Checker) Apply(containers []groups.Container) {
 	for index := range containers {
 		container := &containers[index]
 		container.UpdateAvailable = false
+		container.CurrentDigest = ""
+		container.ProposedDigest = ""
 		if container.Project == "" || container.State != "running" {
 			continue
 		}
@@ -73,10 +75,14 @@ func (c *Checker) Apply(containers []groups.Container) {
 		if err != nil {
 			continue
 		}
+		container.CurrentDigest = localRepositoryDigest(ref, container.RepoDigests)
 		key := ref.key()
 		result, checked := c.results[key]
-		if checked && result.digest != "" && hasLocalRepository(ref, container.RepoDigests) {
-			container.UpdateAvailable = !hasLocalDigest(ref, container.RepoDigests, result.digest)
+		if checked && result.digest != "" && container.CurrentDigest != "" {
+			container.UpdateAvailable = container.CurrentDigest != result.digest
+			if container.UpdateAvailable {
+				container.ProposedDigest = result.digest
+			}
 		}
 		due := !checked || (!result.retryAt.IsZero() && !now.Before(result.retryAt))
 		if checked && result.retryAt.IsZero() && result.digest != "" {

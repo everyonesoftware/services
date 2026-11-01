@@ -2,6 +2,7 @@ package updates
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -129,6 +130,20 @@ func TestApplyMarksContainerWhenConfiguredTagDigestMoved(t *testing.T) {
 	checker.Apply(containers)
 	if !containers[0].UpdateAvailable {
 		t.Fatal("expected updateAvailable when configured tag digest differs")
+	}
+	encoded, err := json.Marshal(containers[0])
+	if err != nil {
+		t.Fatalf("marshal updated container: %v", err)
+	}
+	var digestState struct {
+		CurrentDigest  string `json:"currentDigest"`
+		ProposedDigest string `json:"proposedDigest"`
+	}
+	if err := json.Unmarshal(encoded, &digestState); err != nil {
+		t.Fatalf("decode digest state: %v", err)
+	}
+	if digestState.CurrentDigest != "sha256:old" || digestState.ProposedDigest != "sha256:new" {
+		t.Fatalf("digest state = %+v, want current sha256:old and proposed sha256:new", digestState)
 	}
 	if registry.calls != 1 {
 		t.Fatalf("registry calls = %d, want 1", registry.calls)

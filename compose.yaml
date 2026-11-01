@@ -14,5 +14,14 @@ services:
     environment:
       LISTEN_ADDR: ":8080"
       DOCKER_SOCKET: /var/run/docker.sock
+      SERVICES_ALLOWED_HOSTS: ${SERVICES_ALLOWED_HOSTS:-}
+      SERVICES_COMPOSE_HOST_ROOT: ${SERVICES_COMPOSE_HOST_ROOT:-E:/Containers}
+      SERVICES_COMPOSE_MOUNT_ROOT: ${SERVICES_COMPOSE_MOUNT_ROOT:-/run/desktop/mnt/host/e/Containers}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - type: bind
+        source: "${SERVICES_COMPOSE_HOST_ROOT:-E:/Containers}"
+        target: ${SERVICES_COMPOSE_MOUNT_ROOT:-/run/desktop/mnt/host/e/Containers}
+        read_only: true
+        bind:
+          create_host_path: false

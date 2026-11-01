@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "test:icons": "node --test src/brandIcons.test.js",
     "test:updates": "node --test src/updateMetrics.test.js",
+    "test:image-reference": "node --test src/imageReference.test.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },

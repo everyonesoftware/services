@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 
 	"services/internal/groups"
@@ -16,6 +15,8 @@ import (
 
 const composeProjectLabel = "com.docker.compose.project"
 const composeServiceLabel = "com.docker.compose.service"
+const composeWorkingDirLabel = "com.docker.compose.project.working_dir"
+const composeConfigFilesLabel = "com.docker.compose.project.config_files"
 
 type Client struct {
 	baseURL string
@@ -50,7 +51,6 @@ type containerSummary struct {
 type imageSummary struct {
 	ID          string   `json:"Id"`
 	RepoDigests []string `json:"RepoDigests"`
-	RepoTags    []string `json:"RepoTags"`
 }
 
 type containerInspect struct {
@@ -77,16 +77,9 @@ func (c *Client) Containers() ([]groups.Container, error) {
 	}
 	var images []imageSummary
 	imageDigests := make(map[string][]string)
-	imageTags := make(map[string][]string)
 	if err := c.get(prefix+"/images/json?all=1&digests=1", &images); err == nil {
 		for _, image := range images {
 			imageDigests[image.ID] = image.RepoDigests
-			for _, tag := range image.RepoTags {
-				if tag != "" && tag != "<none>:<none>" {
-					imageTags[image.ID] = append(imageTags[image.ID], tag)
-				}
-			}
-			sort.Strings(imageTags[image.ID])
 		}
 	}
 
@@ -98,14 +91,16 @@ func (c *Client) Containers() ([]groups.Container, error) {
 			summary.Names[0] = strings.TrimPrefix(summary.Names[0], "/")
 		}
 		container := groups.Container{
-			ID:          summary.ID,
-			Name:        first(summary.Names),
-			Project:     summary.Labels[composeProjectLabel],
-			Service:     summary.Labels[composeServiceLabel],
-			Image:       summary.Image,
-			ImageTags:   imageTags[summary.ImageID],
-			State:       state,
-			RepoDigests: imageDigests[summary.ImageID],
+			ID:                      summary.ID,
+			Name:                    first(summary.Names),
+			Project:                 summary.Labels[composeProjectLabel],
+			Service:                 summary.Labels[composeServiceLabel],
+			Image:                   summary.Image,
+			State:                   state,
+			RepoDigests:             imageDigests[summary.ImageID],
+			ComposeWorkingDir:       summary.Labels[composeWorkingDirLabel],
+			ComposeConfigFiles:      splitConfigFiles(summary.Labels[composeConfigFilesLabel]),
+			ComposeConfigFilesLabel: summary.Labels[composeConfigFilesLabel],
 		}
 		var inspect containerInspect
 		path := prefix + "/containers/" + url.PathEscape(summary.ID) + "/json"
@@ -145,4 +140,14 @@ func first(values []string) string {
 		return ""
 	}
 	return values[0]
+}
+
+func splitConfigFiles(value string) []string {
+	var files []string
+	for _, file := range strings.Split(value, ",") {
+		if file = strings.TrimSpace(file); file != "" {
+			files = append(files, file)
+		}
+	}
+	return files
 }

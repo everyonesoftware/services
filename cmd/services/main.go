@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"services/internal/composeupdate"
 	"services/internal/dashboard"
 	"services/internal/dockerapi"
 	"services/internal/updates"
@@ -30,10 +32,16 @@ func main() {
 	}
 	source := dockerapi.NewUnixSocketClient(socket)
 	checker := updates.NewChecker(updates.NewRegistryClient(nil), 0)
+	composeUpdater := composeupdate.New(
+		os.Getenv("SERVICES_COMPOSE_HOST_ROOT"),
+		os.Getenv("SERVICES_COMPOSE_MOUNT_ROOT"),
+		socket,
+	)
+	allowedHosts := strings.Split(os.Getenv("SERVICES_ALLOWED_HOSTS"), ",")
 	go checker.Run(context.Background(), source)
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           dashboard.NewWithUpdates(source, checker, version),
+		Handler:           dashboard.NewWithActionsAndAllowedHosts(source, checker, composeUpdater, version, allowedHosts),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("Services listening on %s", addr)

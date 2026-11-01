@@ -95,23 +95,21 @@ func (r imageReference) canonicalRepository() string {
 }
 
 func hasLocalRepository(ref imageReference, repoDigests []string) bool {
+	return localRepositoryDigest(ref, repoDigests) != ""
+}
+
+func localRepositoryDigest(ref imageReference, repoDigests []string) string {
 	for _, value := range repoDigests {
-		repository, _, ok := splitRepoDigest(value)
+		repository, digest, ok := splitRepoDigest(value)
 		if ok && repository == ref.canonicalRepository() {
-			return true
+			return digest
 		}
 	}
-	return false
+	return ""
 }
 
 func hasLocalDigest(ref imageReference, repoDigests []string, digest string) bool {
-	for _, value := range repoDigests {
-		repository, localDigest, ok := splitRepoDigest(value)
-		if ok && repository == ref.canonicalRepository() && localDigest == digest {
-			return true
-		}
-	}
-	return false
+	return localRepositoryDigest(ref, repoDigests) == digest
 }
 
 func splitRepoDigest(value string) (string, string, bool) {
