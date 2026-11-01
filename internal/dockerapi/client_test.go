@@ -19,7 +19,7 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 			if r.URL.Query().Get("digests") != "1" {
 				t.Errorf("images query = %q, want digests=1", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`[{"Id":"sha256:image","RepoDigests":["jellyfin/jellyfin@sha256:manifest"]},{"Id":"sha256:other"}]`))
+			_, _ = w.Write([]byte(`[{"Id":"sha256:image","Created":1700000000,"RepoDigests":["jellyfin/jellyfin@sha256:manifest"]},{"Id":"sha256:other"}]`))
 		case "/v1.47/containers/abc/json":
 			_, _ = w.Write([]byte(`{"Config":{"Image":"nginx:latest"},"State":{"Status":"running","Health":{"Status":"healthy"}}}`))
 		default:
@@ -45,6 +45,9 @@ func TestContainersReadsComposeLabelsAndHealthFromEngine(t *testing.T) {
 	}
 	if len(got.RepoDigests) != 1 || got.RepoDigests[0] != "jellyfin/jellyfin@sha256:manifest" {
 		t.Fatalf("container repo digests = %v, want the running image's repository digest", got.RepoDigests)
+	}
+	if got.ImageCreatedAt != 1700000000 {
+		t.Fatalf("container image created timestamp = %d, want 1700000000", got.ImageCreatedAt)
 	}
 	if got.ComposeWorkingDir != "E:/Containers/shop" || !reflect.DeepEqual(got.ComposeConfigFiles, []string{"E:/Containers/shop/compose.yaml", "E:/Containers/shop/override.yaml"}) || got.ComposeConfigFilesLabel != "E:/Containers/shop/compose.yaml,E:/Containers/shop/override.yaml" {
 		t.Fatalf("Compose paths = (%q, %v), want the container's project metadata", got.ComposeWorkingDir, got.ComposeConfigFiles)

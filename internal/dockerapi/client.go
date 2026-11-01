@@ -50,6 +50,7 @@ type containerSummary struct {
 
 type imageSummary struct {
 	ID          string   `json:"Id"`
+	Created     int64    `json:"Created"`
 	RepoDigests []string `json:"RepoDigests"`
 }
 
@@ -77,9 +78,11 @@ func (c *Client) Containers() ([]groups.Container, error) {
 	}
 	var images []imageSummary
 	imageDigests := make(map[string][]string)
+	imageCreatedAt := make(map[string]int64)
 	if err := c.get(prefix+"/images/json?all=1&digests=1", &images); err == nil {
 		for _, image := range images {
 			imageDigests[image.ID] = image.RepoDigests
+			imageCreatedAt[image.ID] = image.Created
 		}
 	}
 
@@ -98,6 +101,7 @@ func (c *Client) Containers() ([]groups.Container, error) {
 			Image:                   summary.Image,
 			State:                   state,
 			RepoDigests:             imageDigests[summary.ImageID],
+			ImageCreatedAt:          imageCreatedAt[summary.ImageID],
 			ComposeWorkingDir:       summary.Labels[composeWorkingDirLabel],
 			ComposeConfigFiles:      splitConfigFiles(summary.Labels[composeConfigFilesLabel]),
 			ComposeConfigFilesLabel: summary.Labels[composeConfigFilesLabel],

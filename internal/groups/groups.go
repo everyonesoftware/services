@@ -19,6 +19,7 @@ type Container struct {
 	Project                 string   `json:"project"`
 	Service                 string   `json:"service"`
 	Image                   string   `json:"image"`
+	ImageCreatedAt          int64    `json:"imageCreatedAt,omitempty"`
 	State                   string   `json:"state"`
 	Health                  string   `json:"health,omitempty"`
 	RepoDigests             []string `json:"-"`

@@ -10,6 +10,7 @@ type Container = {
   project: string
   service: string
   image?: string
+  imageCreatedAt?: number
   state: string
   health?: string
   updateAvailable?: boolean
@@ -248,6 +249,7 @@ function UpdateDialog({
           <div className="update-state-detail"><span>Image</span><code title={container.image}>{image.image}</code></div>
           <div className="update-state-detail"><span>Tag</span><code title={image.tag}>{image.tag}</code></div>
           <div className="update-state-detail"><span>Digest</span><code title={container.currentDigest}>{container.currentDigest || 'Not reported'}</code></div>
+          <div className="update-state-detail"><span>Created</span><strong>{container.imageCreatedAt ? new Date(container.imageCreatedAt * 1000).toLocaleString() : 'Not reported'}</strong></div>
           <div className="update-state-status"><span>State</span><strong>{currentState}</strong></div>
         </section>
         <span className="update-comparison-arrow" aria-hidden="true">→</span>
