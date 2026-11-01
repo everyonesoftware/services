@@ -28,6 +28,7 @@ export default function DashboardCompact() {
   const [error, setError] = useState('')
   const [lastChecked, setLastChecked] = useState<Date | null>(null)
   const [updateTarget, setUpdateTarget] = useState<Container | null>(null)
+  const [bulkTarget, setBulkTarget] = useState<Project | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [updateCheckMessage, setUpdateCheckMessage] = useState('')
@@ -129,7 +130,7 @@ export default function DashboardCompact() {
 
         {loading ? <div className="empty-state"><span className="spinner" /><p>Connecting to Docker Engine…</p></div>
           : projects.length === 0 && !error ? <div className="empty-state"><div className="empty-icon">▦</div><h3>No Compose projects found</h3><p>Projects appear here when Docker has discovered Compose containers.</p></div>
-            : <div className="project-list">{projects.map((project) => <ProjectCard key={project.name} project={project} onOpenUpdate={setUpdateTarget} />)}</div>}
+            : <div className="project-list">{projects.map((project) => <ProjectCard key={project.name} project={project} onOpenUpdate={setUpdateTarget} onUpdateAll={setBulkTarget} />)}</div>}
 
         <footer className="footer">Services <span>•</span> Docker Compose health monitor <span>•</span> {lastChecked ? 'Connected to local Engine' : 'Connecting'}</footer>
       </div>
@@ -140,6 +141,7 @@ export default function DashboardCompact() {
       onClose={() => setUpdateTarget(null)}
       onUpdated={() => setRefreshKey((value) => value + 1)}
     />
+    <BulkUpdateDialog project={bulkTarget} onClose={() => setBulkTarget(null)} onUpdated={() => setRefreshKey((value) => value + 1)} />
   </main>
 }
 
@@ -147,7 +149,7 @@ function SummaryMetric({ label, value, tone = '' }: { label: string; value: numb
   return <div className="summary-metric"><span className="summary-label">{label}</span><strong className={tone}>{value}</strong></div>
 }
 
-function ProjectCard({ project, onOpenUpdate }: { project: Project; onOpenUpdate: (container: Container) => void }) {
+function ProjectCard({ project, onOpenUpdate, onUpdateAll }: { project: Project; onOpenUpdate: (container: Container) => void; onUpdateAll: (project: Project) => void }) {
   const labels: Record<string, string> = { healthy: 'Healthy', running: 'Running', starting: 'Starting', unhealthy: 'Unhealthy' }
   const label = labels[project.status] ?? project.status
   const icon = iconForProject(project)
@@ -166,6 +168,7 @@ function ProjectCard({ project, onOpenUpdate }: { project: Project; onOpenUpdate
       </div>
     </summary>
     <div className="container-list">
+      {updateCount > 0 && <button type="button" className="dialog-button secondary compose-update-all" onClick={(event) => { event.preventDefault(); onUpdateAll(project) }}>Update All ({updateCount})</button>}
       {project.containers.map((container) => {
         const status = container.health || container.state
         const tone = status === 'healthy' || status === 'running' ? 'ok' : status === 'starting' || status === 'created' ? 'pending' : 'bad'
@@ -192,6 +195,53 @@ function ProjectCard({ project, onOpenUpdate }: { project: Project; onOpenUpdate
       })}
     </div>
   </details>
+}
+
+function BulkUpdateDialog({ project, onClose, onUpdated }: { project: Project | null; onClose: () => void; onUpdated: () => void }) {
+  const [selected, setSelected] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    if (project) {
+      setSelected(project.containers.filter((container) => container.updateAvailable).map((container) => container.id))
+      setMessage('')
+      dialogRef.current?.showModal()
+    } else if (dialogRef.current?.open) dialogRef.current.close()
+  }, [project])
+  const run = async () => {
+    if (!project || busy || !selected.length) return
+    setBusy(true); setMessage('')
+    const failed: string[] = []
+    for (const id of selected) {
+      const container = project.containers.find((item) => item.id === id)
+      if (!container) continue
+      try {
+        const response = await fetch(`/api/containers/${encodeURIComponent(id)}/update`, { method: 'POST' })
+        if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('Progress stream unavailable')
+        const decoder = new TextDecoder(); let buffer = ''; let failure = ''
+        while (true) {
+          const { value, done } = await reader.read(); buffer += decoder.decode(value, { stream: !done })
+          const lines = buffer.split('\n'); buffer = lines.pop() || ''
+          for (const line of lines) if (line.trim()) { const event = JSON.parse(line) as { message: string }; if (event.message.startsWith('ERROR: ')) failure = event.message.slice(7) }
+          if (done) break
+        }
+        if (failure) throw new Error(failure)
+      } catch (cause) { failed.push(`${container.name || container.service}: ${cause instanceof Error ? cause.message : 'Update failed'}`) }
+    }
+    setBusy(false); onUpdated()
+    setMessage(failed.length ? `Failed: ${failed.join(' · ')}` : 'All selected containers updated successfully.')
+  }
+  return <dialog ref={dialogRef} className="update-dialog" aria-labelledby="bulk-update-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose() }}>
+    {project && <div className="update-dialog-content"><div className="update-dialog-heading"><div><span className="eyebrow">COMPOSE GROUP</span><h2 id="bulk-update-title">Update containers</h2></div><p>{project.name}</p></div>
+      <p className="update-dialog-copy">Expand each container to review its image and choose which available updates to apply. Selected containers update sequentially.</p>
+      <div className="bulk-update-list">{project.containers.filter((item) => item.updateAvailable).map((item) => <details key={item.id} className="bulk-update-item"><summary>{item.name || item.service}</summary><label><input type="checkbox" checked={selected.includes(item.id)} disabled={busy} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> Update this container</label><p>{item.image || 'Image unavailable'}{item.proposedDigest ? ` · ${item.proposedDigest}` : ''}</p></details>)}</div>
+      {message && <p className={`update-dialog-message ${message.startsWith('All selected') ? 'success' : 'error'}`} role="status">{message}</p>}
+      <div className="update-dialog-actions"><button className="dialog-button secondary" type="button" disabled={busy} onClick={onClose}>Close</button><button className="dialog-button primary" type="button" disabled={busy || !selected.length} onClick={() => void run()}>{busy ? 'Updating…' : `Update selected (${selected.length})`}</button></div>
+    </div>}
+  </dialog>
 }
 
 function UpdateDialog({
