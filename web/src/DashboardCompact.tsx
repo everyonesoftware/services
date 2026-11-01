@@ -208,6 +208,12 @@ function UpdateDialog({
   const [message, setMessage] = useState('')
   const [pulled, setPulled] = useState(false)
   const [operationLog, setOperationLog] = useState<string[]>([])
+  const [tailLogs, setTailLogs] = useState(true)
+  const logRef = useRef<HTMLPreElement>(null)
+
+  useEffect(() => {
+    if (tailLogs && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [operationLog, tailLogs])
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -305,7 +311,8 @@ function UpdateDialog({
       {message && <p className={`update-dialog-message ${busy ? 'pending' : message.startsWith('Image pulled') ? 'success' : 'error'}`} role={message.startsWith('Image pulled') ? 'status' : 'alert'}>{message}</p>}
       <details className="operation-log" open={busy !== null}>
         <summary>Operation log {busy && <span>· running</span>}</summary>
-        <pre aria-live="polite">{operationLog.length ? operationLog.join('\n') : 'Command output will appear here.'}</pre>
+        <label className="operation-log-tail"><input type="checkbox" checked={tailLogs} onChange={(event) => setTailLogs(event.target.checked)} />Tail logs</label>
+        <pre ref={logRef} aria-live="polite">{operationLog.length ? operationLog.join('\n') : 'Command output will appear here.'}</pre>
       </details>
       <div className="update-dialog-actions">
         <button type="button" className="dialog-button secondary" onClick={dismiss} disabled={busy !== null}>Cancel</button>
