@@ -92,6 +92,8 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 		allowed[publicOrigin.host] = struct{}{}
 	}
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
+	s.mux.HandleFunc("GET /api/operations", s.operations)
+	s.mux.HandleFunc("GET /api/operations/{id}", s.operation)
 	s.mux.HandleFunc("GET /api/projects", s.projects)
 	s.mux.HandleFunc("GET /api/monitor", s.monitorInfo)
 	s.mux.HandleFunc("POST /api/projects/{name}/update", s.projectUpdate)
@@ -230,6 +232,8 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		return
 	}
 
+	job := composeOperations.beginLegacy(selected.Project, action)
+	defer func() { composeOperations.finishLegacy(job, err) }()
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -238,6 +242,7 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 	progress := func(message string) {
 		streamMu.Lock()
 		defer streamMu.Unlock()
+		composeOperations.message(job, message)
 		_ = encoder.Encode(map[string]string{"type": "progress", "message": message})
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()

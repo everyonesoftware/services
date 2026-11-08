@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -33,21 +32,7 @@ func projectRequest(name string) *http.Request {
 }
 func projectTestServer(containers []groups.Container, updater *projectUpdaterStub) *Server {
 	s := NewWithActionsAndAllowedHosts(fakeSource{containers: containers}, nil, updater, 42, []string{"dashboard.test"})
-	s.mux = http.NewServeMux()
-	s.mux.HandleFunc("POST /api/projects/{name}/update", s.projectUpdate)
 	return s
-}
-func projectEvents(t *testing.T, response *httptest.ResponseRecorder) []map[string]string {
-	t.Helper()
-	var events []map[string]string
-	for _, line := range strings.Split(strings.TrimSpace(response.Body.String()), "\n") {
-		var event map[string]string
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			t.Fatalf("invalid event %q: %v", line, err)
-		}
-		events = append(events, event)
-	}
-	return events
 }
 func TestProjectUpdateRejectsUntrustedOriginsAndHosts(t *testing.T) {
 	for _, tc := range []struct{ name, host, origin string }{
@@ -71,23 +56,23 @@ func TestProjectUpdateRejectsUntrustedOriginsAndHosts(t *testing.T) {
 	}
 }
 
-func TestProjectUpdateRejectsMissingOrUnchangedProjects(t *testing.T) {
+func TestProjectUpdateRecordsMissingOrUnchangedProjects(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		members []groups.Container
-		code    int
+		message string
 	}{
-		{"unknown", nil, 404},
-		{"shop", []groups.Container{{Project: "shop", Service: "web"}}, 409},
-		{"standalone", []groups.Container{{Service: "web", UpdateAvailable: true}}, 404},
+		{"unknown", nil, "Project not found"},
+		{"shop", []groups.Container{{Project: "shop", Service: "web"}}, "Project has no available image updates"},
+		{"standalone", []groups.Container{{Service: "web", UpdateAvailable: true}}, "Project not found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			updater := &projectUpdaterStub{}
 			s := projectTestServer(tc.members, updater)
-			w := httptest.NewRecorder()
-			s.ServeHTTP(w, projectRequest(tc.name))
-			if w.Code != tc.code || len(updater.members) != 0 {
-				t.Fatalf("code=%d members=%v", w.Code, updater.members)
+			op := submitProject(t, s, tc.name)
+			op = awaitOperation(t, s, op.ID)
+			if op.State != "error" || op.Error != tc.message || len(updater.members) != 0 {
+				t.Fatalf("operation=%+v members=%v", op, updater.members)
 			}
 		})
 	}
@@ -96,27 +81,39 @@ func TestProjectUpdateUsesFreshEngineInventory(t *testing.T) {
 	updater := &projectUpdaterStub{}
 	s := projectTestServer([]groups.Container{{Project: "shop", Service: "web", UpdateAvailable: true}}, updater)
 	s.SetActionSource(fakeSource{})
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, projectRequest("shop"))
-	if w.Code != 404 || len(updater.members) != 0 {
-		t.Fatalf("stale inventory used: code=%d members=%v", w.Code, updater.members)
+	op := submitProject(t, s, "shop")
+	op = awaitOperation(t, s, op.ID)
+	if op.State != "error" || op.Error != "Project not found" || len(updater.members) != 0 {
+		t.Fatalf("stale inventory used: %+v", op)
 	}
 }
 
 func TestProjectUpdateSerializesGloballyUntilDetachedWorkCompletes(t *testing.T) {
 	started := make(chan context.Context, 1)
 	finish := make(chan struct{})
-	done := make(chan struct{})
 	updater := &projectUpdaterStub{run: func(ctx context.Context) error { started <- ctx; <-finish; return nil }}
-	s := projectTestServer([]groups.Container{{Project: "shop", Service: "web", UpdateAvailable: true}}, updater)
+	s := projectTestServer([]groups.Container{{Project: "shop", UpdateAvailable: true}}, updater)
 	r := projectRequest("shop")
 	requestCtx, cancel := context.WithCancel(r.Context())
-	r = r.WithContext(requestCtx)
-	response := httptest.NewRecorder()
-	go func() { defer close(done); s.ServeHTTP(response, r) }()
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r.WithContext(requestCtx))
+	if w.Code != 202 {
+		t.Fatalf("code=%d", w.Code)
+	}
+	var first operationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
 	ctx := <-started
 	cancel()
-	defer func() { close(finish); <-done }()
+	var second operationResponse
+	defer func() {
+		close(finish)
+		awaitOperation(t, s, first.ID)
+		if second.ID != "" {
+			awaitOperation(t, s, second.ID)
+		}
+	}()
 	if ctx.Err() != nil {
 		t.Fatal("browser cancellation stopped Compose work")
 	}
@@ -124,11 +121,10 @@ func TestProjectUpdateSerializesGloballyUntilDetachedWorkCompletes(t *testing.T)
 		t.Fatal("missing bounded background timeout")
 	}
 	otherUpdater := &projectUpdaterStub{}
-	other := projectTestServer([]groups.Container{{Project: "other", Service: "web", UpdateAvailable: true}}, otherUpdater)
-	w := httptest.NewRecorder()
-	other.ServeHTTP(w, projectRequest("other"))
-	if w.Code != 409 || len(otherUpdater.members) != 0 {
-		t.Fatalf("overlapping mutation admitted: code=%d members=%v", w.Code, otherUpdater.members)
+	other := projectTestServer([]groups.Container{{Project: "other", UpdateAvailable: true}}, otherUpdater)
+	second = submitProject(t, other, "other")
+	if second.State != "queued" || second.QueuePosition != 1 {
+		t.Fatalf("not queued: %+v", second)
 	}
 }
 
@@ -152,21 +148,18 @@ func TestProjectUpdateRejectsSelfProject(t *testing.T) {
 	}
 }
 
-func TestProjectUpdateFailureEmitsTerminalErrorAndReleasesGate(t *testing.T) {
+func TestProjectUpdateFailureRecordsTerminalErrorAndContinues(t *testing.T) {
 	updater := &projectUpdaterStub{run: func(context.Context) error { return errors.New("pull failed") }}
-	s := projectTestServer([]groups.Container{{Project: "shop", Service: "web", UpdateAvailable: true}}, updater)
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, projectRequest("shop"))
-	events := projectEvents(t, w)
-	if events[len(events)-1]["type"] != "error" || events[len(events)-1]["message"] != "pull failed" {
-		t.Fatalf("events = %v", events)
+	s := projectTestServer([]groups.Container{{Project: "shop", UpdateAvailable: true}}, updater)
+	op := submitProject(t, s, "shop")
+	op = awaitOperation(t, s, op.ID)
+	if op.State != "error" || op.Error != "pull failed" || op.FinishedAt == "" {
+		t.Fatalf("operation=%+v", op)
 	}
 	updater.run = nil
-	w = httptest.NewRecorder()
-	s.ServeHTTP(w, projectRequest("shop"))
-	events = projectEvents(t, w)
-	if w.Code != 200 || events[len(events)-1]["type"] != "complete" {
-		t.Fatalf("gate not released: code=%d events=%v", w.Code, events)
+	op = submitProject(t, s, "shop")
+	if op = awaitOperation(t, s, op.ID); op.State != "complete" {
+		t.Fatalf("queue stuck: %+v", op)
 	}
 }
 
@@ -174,14 +167,66 @@ func TestProjectUpdateAppliesRegistryStatusBeforeSelection(t *testing.T) {
 	updater := &projectUpdaterStub{}
 	s := projectTestServer([]groups.Container{{Project: "shop", Service: "web"}}, updater)
 	s.updates = fakeUpdateApplier{}
-	w := httptest.NewRecorder()
-	s.ServeHTTP(w, projectRequest("shop"))
-	if w.Code != 200 || len(updater.members) != 1 || !updater.members[0].UpdateAvailable {
-		t.Fatalf("code=%d members=%v", w.Code, updater.members)
+	op := submitProject(t, s, "shop")
+	op = awaitOperation(t, s, op.ID)
+	if op.State != "complete" || len(updater.members) != 1 || !updater.members[0].UpdateAvailable {
+		t.Fatalf("operation=%+v members=%v", op, updater.members)
 	}
 }
 
-func TestProjectUpdateStreamsExplicitCompletion(t *testing.T) {
+type operationResponse struct {
+	ID            string   `json:"id"`
+	Project       string   `json:"project"`
+	Action        string   `json:"action"`
+	State         string   `json:"state"`
+	QueuedAt      string   `json:"queuedAt"`
+	StartedAt     string   `json:"startedAt"`
+	FinishedAt    string   `json:"finishedAt"`
+	Messages      []string `json:"messages"`
+	Error         string   `json:"error"`
+	QueuePosition int      `json:"queuePosition"`
+}
+
+func submitProject(t *testing.T, s *Server, name string) operationResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, projectRequest(name))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("submit code=%d body=%s", w.Code, w.Body.String())
+	}
+	var op operationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &op); err != nil {
+		t.Fatal(err)
+	}
+	if op.ID == "" || op.Project != name || op.Action != "update project" || op.QueuedAt == "" || op.Messages == nil {
+		t.Fatalf("invalid operation: %+v", op)
+	}
+	return op
+}
+
+func awaitOperation(t *testing.T, s *Server, id string) operationResponse {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest("GET", "/api/operations/"+id, nil))
+		if w.Code != 200 {
+			t.Fatalf("operation lookup: %d %s", w.Code, w.Body.String())
+		}
+		var op operationResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &op); err != nil {
+			t.Fatal(err)
+		}
+		if op.State == "complete" || op.State == "error" {
+			return op
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("operation did not finish")
+	return operationResponse{}
+}
+
+func TestProjectUpdateAcceptsOperationWithExplicitCompletion(t *testing.T) {
 	updater := &projectUpdaterStub{}
 	members := []groups.Container{
 		{ID: "web1", Project: "shop", Service: "web", UpdateAvailable: true},
@@ -190,16 +235,12 @@ func TestProjectUpdateStreamsExplicitCompletion(t *testing.T) {
 		{ID: "other", Project: "other", Service: "api", UpdateAvailable: true},
 	}
 	s := projectTestServer(members, updater)
-	response := httptest.NewRecorder()
-	s.ServeHTTP(response, projectRequest("shop"))
-	if response.Code != 200 || len(updater.members) != 3 {
-		t.Fatalf("status=%d members=%v body=%s", response.Code, updater.members, response.Body.String())
+	op := submitProject(t, s, "shop")
+	op = awaitOperation(t, s, op.ID)
+	if op.State != "complete" || op.StartedAt == "" || op.FinishedAt == "" || len(updater.members) != 3 || len(op.Messages) < 2 {
+		t.Fatalf("operation=%+v members=%v", op, updater.members)
 	}
-	if !strings.HasPrefix(response.Header().Get("Content-Type"), "application/x-ndjson") {
-		t.Fatal("want NDJSON")
-	}
-	events := projectEvents(t, response)
-	if len(events) < 2 || events[0]["type"] != "progress" || events[len(events)-1]["type"] != "complete" {
-		t.Fatalf("events=%v", events)
+	if _, err := time.Parse(time.RFC3339Nano, op.QueuedAt); err != nil {
+		t.Fatal(err)
 	}
 }

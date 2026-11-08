@@ -31,9 +31,23 @@ Choose **Review update** on a Compose group to see the changed services and dige
 1. Validate the project's paths and selected service configuration.
 2. Pull the selected services' current tags.
 3. Run `docker compose up -d --no-deps --pull never --no-build --wait --wait-timeout 300` for those services.
-4. Report success only when Compose reports completion; stream failures and command progress to the dialog.
+4. Report success only when Compose reports completion; retain failures and command progress in the shared operation activity.
 
 This recreates containers and can cause downtime. It uses the Compose files and `.env` values on disk at execution time. Mutable tags may change between review and pull. No builds, dependency startup, volume removal, automatic updates, or automatic rollback are performed. Back up application data before updating. Compose operations are serialized to prevent overlapping updates. Closing a browser does not roll an update back. The Services project is protected from self-update; update Services externally with Compose instead. Set `SERVICES_PROJECT_NAME` if its Compose project is not named `services`.
+
+### Shared Compose operation queue
+
+`POST /api/projects/{name}/update` returns **202 Accepted** with a JSON operation instead of a progress stream. Project updates run in FIFO submission order, one Compose mutation at a time, across all tabs and dashboard server instances in the process. A duplicate submission for an already queued or running project update returns **202 with the same operation ID**, without starting another update. Up to **32 waiting operations** are accepted in addition to the active action; further submissions return **429 Too Many Requests** (duplicates are still accepted).
+
+- `GET /api/operations` returns `{ "operations": [...] }`, newest submitted first, including active legacy container actions.
+- `GET /api/operations/{id}` returns one operation, or **404** for an unknown or evicted ID. Both read endpoints disable caching.
+- An operation contains `id`, `project`, `action` (`update project`, `pull`, or `update`), `state` (`queued`, `running`, `complete`, or `error`), ISO-8601 UTC `queuedAt`, `messages`, and `queuePosition` (1-based while waiting, otherwise 0). `startedAt`, `finishedAt`, and `error` appear when applicable. Poll the list about every two seconds and an individual active operation about every second; only a terminal state confirms the result.
+
+The server rechecks live Docker inventory, registry update status, and self-update protection **when execution starts**, not from the inventory shown when submitted. A project that disappeared, no longer has an available update, or cannot be checked against Docker becomes an `error` operation. Failure releases the queue so later projects can continue. Each executing project operation has a 15-minute background context, independent of browser disconnection; there is no browser cancellation or rollback.
+
+Legacy container pull/update endpoints retain their NDJSON progress and explicit terminal records. They share the same serialization, appear in operation activity once execution begins, and return **409 Conflict** while the queue is busy; they cannot jump ahead of queued projects.
+
+Queue and activity are **in memory, not durable across process restarts**. Keep at most 100 terminal operations plus queued/running operations. Each operation retains its newest 200 progress messages, with each message and terminal error limited to 4,096 UTF-8 bytes. Older output and terminal history are discarded. This is bounded operational visibility, not an audit log or a guarantee that every command line is retained.
 
 ## Run
 

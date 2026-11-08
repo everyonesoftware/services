@@ -4,18 +4,15 @@ import * as api from './api.ts'
 
 const stream = (...parts) => new Response(new ReadableStream({ start(controller) { const encoder = new TextEncoder(); parts.forEach(part => controller.enqueue(encoder.encode(part))); controller.close() } }))
 
-test('stalled update has a bounded unconfirmed outcome and cancels its reader', { timeout: 500 }, async () => {
-  let cancelled = false
+test('queue submission times out without claiming that the server cancelled the operation', { timeout: 500 }, async () => {
   let signal
-  const response = new Response(new ReadableStream({ cancel() { cancelled = true } }))
-  const fetcher = async (_url, options) => { signal = options.signal; return response }
-  await assert.rejects(api.updateProject('site', () => {}, fetcher, 20), /timed out.*unconfirmed/i)
+  const fetcher = async (_url, options) => { signal = options.signal; return new Promise(() => {}) }
+  await assert.rejects(api.updateProject('site', fetcher, 20), /timed out.*unconfirmed/i)
   assert.equal(signal.aborted, true)
-  assert.equal(cancelled, true)
 })
 
 test('stalled request also times out even before response headers', { timeout: 500 }, async () => {
-  await assert.rejects(api.updateProject('site', () => {}, () => new Promise(() => {}), 20), /timed out.*unconfirmed/i)
+  await assert.rejects(api.updateProject('site', () => new Promise(() => {}), 20), /timed out.*unconfirmed/i)
 })
 
 test('image checks accept 204 and preserve server failures; project update uses encoded group API', async () => {
@@ -25,8 +22,14 @@ test('image checks accept 204 and preserve server failures; project update uses 
   await api.checkForUpdates(fetcher)
   assert.deepEqual(requests, [['/api/updates/check', 'POST']])
   await assert.rejects(api.checkForUpdates(async () => new Response('Registry unavailable', { status: 503 })), /Registry unavailable/)
-  await api.updateProject('media server', () => {}, async (url, options) => { requests.push([url, options.method]); return stream('{"type":"complete","message":"Updated"}\n') })
+  const operation = { id: 'operation-1', project: 'media server', action: 'update project', state: 'queued', queuedAt: '2026-11-08T12:00:00Z', messages: [], queuePosition: 2 }
+  assert.deepEqual(await api.updateProject('media server', async (url, options) => { requests.push([url, options.method]); return Response.json(operation, { status: 202 }) }), operation)
   assert.deepEqual(requests[1], ['/api/projects/media%20server/update', 'POST'])
+})
+
+test('queue submission preserves rejections and rejects invalid acceptance data', async () => {
+  await assert.rejects(api.updateProject('site', async () => new Response('Queue is full', { status: 429 })), /Queue is full/)
+  await assert.rejects(api.updateProject('site', async () => Response.json({ state: 'complete' })), /Invalid operation/)
 })
 
 test('explicit errors, HTTP failure and malformed event data never succeed', async () => {

@@ -1,24 +1,27 @@
-import type { UpdateEvent } from './types.ts'
+import type { Operation, UpdateEvent } from './types.ts'
 
 export async function checkForUpdates(fetcher: typeof fetch = fetch): Promise<void> {
   const response = await fetcher('/api/updates/check', { method: 'POST' })
   if (!response.ok) throw new Error((await response.text()).trim() || `Image check failed (${response.status})`)
 }
 
-export async function updateProject(name: string, onEvent: (event: UpdateEvent) => void, fetcher: typeof fetch = fetch, timeoutMs = 16 * 60_000): Promise<void> {
+export async function updateProject(name: string, fetcher: typeof fetch = fetch, timeoutMs = 12_000): Promise<Operation> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new Error('Update timed out; result is unconfirmed. The server may still be working. Verify service state before retrying.'))
+      reject(new Error('Submission timed out; acceptance is unconfirmed. Check Docker activity before retrying. The server may still be working.'))
       controller.abort()
     }, timeoutMs)
   })
   const operation = async () => {
     const response = await fetcher(`/api/projects/${encodeURIComponent(name)}/update`, { method: 'POST', signal: controller.signal })
-    await consumeUpdateStream(response, onEvent, controller.signal)
+    if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
+    const result = await response.json() as Operation
+    if (!result || typeof result.id !== 'string' || typeof result.project !== 'string' || !['queued', 'running', 'complete', 'error'].includes(result.state) || !Array.isArray(result.messages)) throw new Error('Invalid operation received; check Docker activity before retrying.')
+    return result
   }
-  try { await Promise.race([operation(), timeout]) }
+  try { return await Promise.race([operation(), timeout]) }
   finally { clearTimeout(timer) }
 }
 

@@ -243,6 +243,31 @@ input[type=checkbox] { accent-color: var(--teal); }
   .dialog-actions .button { flex: 1; }
   .output-heading { align-items: flex-start; flex-direction: column; }
 }
+.docker-activity { border: 1px solid var(--border); border-left: 3px solid var(--teal); border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; background: #f3f6ed; min-width: 0; }
+.docker-activity .section-title { margin-bottom: 6px; flex-wrap: wrap; gap: 6px; }
+.activity-scope, .queue-explanation { color: var(--muted); font-size: 11px; line-height: 1.65; }
+.activity-scope { margin-top: 6px; }
+.queue-explanation { margin: 16px 0; }
+.queue-empty { color: #52634c; font-size: 12px; padding: 12px 0 6px; }
+.operation-list { display: grid; gap: 6px; margin-top: 10px; }
+.operation-row { min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); overflow: hidden; }
+.operation-row > summary { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 48px; }
+.operation-row[open] > summary .disclosure { transform: rotate(90deg); }
+.operation-identity { flex: 1; display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.operation-identity strong { font-size: 12px; font-weight: 600; }
+.operation-identity > span, .operation-time, .operation-timestamps { font-size: 10px; color: var(--muted); }
+.operation-time { display: grid; gap: 3px; text-align: right; flex-shrink: 0; }
+.operation-time time { font-family: var(--mono); }
+.operation-inspection { padding: 12px; border-top: 1px solid var(--border); }
+.operation-latest { font-size: 11px; color: #52634c; overflow-wrap: anywhere; }
+.error .operation-latest { color: #a05237; }
+.operation-inspection .operation-output { margin-top: 12px; }
+.operation-history > summary { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-height: 38px; font-size: 11px; color: var(--muted); }
+@media (max-width: 600px) {
+  .docker-activity { padding: 12px; }
+  .operation-row > summary { gap: 8px; padding: 10px; flex-wrap: wrap; }
+  .operation-time { width: 100%; display: flex; gap: 6px; text-align: left; order: 1; }
+}
 .monitor-details { margin: 8px 0 18px; color: var(--muted); font-size: 11px; }
 .monitor-details > summary, .activity-summary { display: flex; align-items: center; gap: 8px; min-height: 32px; width: fit-content; }
 .monitor-details > summary::before, .activity-summary::before { content: '›'; font-size: 18px; line-height: 1; }

@@ -38,6 +38,31 @@ test('update review names exact services and digests with downtime warning, nati
   assert.doesNotMatch(html, /updated successfully/)
 })
 
+test('busy engine review offers queuing and explains fresh execution-time validation', () => {
+  const html = renderToStaticMarkup(createElement(components.UpdateDialog, { project: fixture, onClose: () => {}, onUpdated: () => {}, engineBusy: true }))
+  assert.match(html, /Confirm &amp; queue/)
+  assert.match(html, /re-checked before/i)
+  assert.match(html, /close this dialog/i)
+})
+
+test('Docker activity distinguishes running work, FIFO queue, results and stale visibility', () => {
+  assert.equal(typeof components.DockerActivity, 'function')
+  const operation = { id: 'one', project: 'site', action: 'update project', state: 'running', queuedAt: '2026-11-08T12:00:00Z', startedAt: '2026-11-08T12:00:01Z', messages: ['Pulling <image>'] }
+  const operations = [operation, { ...operation, id: 'two', project: 'media', state: 'queued', queuePosition: 1 }, { ...operation, id: 'three', project: 'proxy', state: 'error', error: 'Probe failed', finishedAt: '2026-11-08T12:01:00Z' }]
+  const html = renderToStaticMarkup(createElement(components.DockerActivity, { operations, loading: false, error: '' }))
+  assert.match(html, /Docker activity/)
+  assert.match(html, /Running/)
+  assert.match(html, /Queued #1/)
+  assert.match(html, /Probe failed/)
+  assert.match(html, /Pulling &lt;image&gt;/)
+  assert.match(html, /Services-managed Compose actions/)
+  const stale = renderToStaticMarkup(createElement(components.DockerActivity, { operations, loading: false, error: 'Network failed' }))
+  assert.match(stale, /Activity unavailable/)
+  assert.match(stale, /Last observed/)
+  const loading = renderToStaticMarkup(createElement(components.DockerActivity, { operations: [], loading: true, error: '' }))
+  assert.doesNotMatch(loading, /No Compose work/)
+})
+
 test('monitor keeps secondary information collapsed and omits promotional copy', () => {
   const html = renderToStaticMarkup(createElement(components.default))
   assert.match(html, /<details class="monitor-details"><summary>Monitor details<\/summary>/)

@@ -26,3 +26,15 @@ export type MonitorEvent = { id: string; project: string; name: string; kind: st
 export type Monitor = { connected: boolean; lastChecked: string | null; error: string | null; incidents: Incident[]; events: MonitorEvent[]; notificationConfigured: boolean }
 export type UpdateEvent = { type: 'progress' | 'complete' | 'error'; message: string }
 export type Filter = 'all' | 'attention' | 'updates'
+export type Operation = {
+  id: string
+  project: string
+  action: string
+  state: 'queued' | 'running' | 'complete' | 'error'
+  queuedAt: string
+  startedAt?: string
+  finishedAt?: string
+  queuePosition?: number
+  messages: string[]
+  error?: string
+}
