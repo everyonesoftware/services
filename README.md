@@ -33,21 +33,46 @@ Choose **Review update** on a Compose group to see the changed services and dige
 3. Run `docker compose up -d --no-deps --pull never --no-build --wait --wait-timeout 300` for those services.
 4. Report success only when Compose reports completion; retain failures and command progress in the shared operation activity.
 
-This recreates containers and can cause downtime. It uses the Compose files and `.env` values on disk at execution time. Mutable tags may change between review and pull. No builds, dependency startup, volume removal, automatic updates, or automatic rollback are performed. Back up application data before updating. Compose operations are serialized to prevent overlapping updates. Closing a browser does not roll an update back. The Services project is protected from self-update; update Services externally with Compose instead. Set `SERVICES_PROJECT_NAME` if its Compose project is not named `services`.
+This recreates containers and can cause downtime. It uses the Compose files and `.env` values on disk at execution time. Mutable tags may change between review and pull. No builds, dependency startup, volume removal, automatic updates, or automatic rollback are performed. Back up application data before updating. Compose operations are serialized to prevent overlapping updates. Closing a browser does not roll an update back.
+
+### Restart-resilient execution and self-update
+
+The supplied deployment stores operations in SQLite under `/data`, backed by the `services-data` named volume. Accepted work, submission order, recent output, and results survive replacement of the Services container. This does **not** persist monitoring incidents, registry-check caches, or webhook delivery history.
+
+Coordinators sharing this volume serialize the entire helper reconciliation and launch interval using a separate SQLite reservation file, `operations.db.coordinator-lock`, alongside the journal. A process crash releases the reservation automatically. Keep all files in the data volume together; do not remove the coordination file while any Services coordinator is running.
+
+Compose updates execute in temporary worker containers, independently of the dashboard process. Each worker uses the exact installed Services image, the Docker socket, the same read-only project mount, and the operation-data volume. Workers have no published ports and do not inherit the dashboard's webhook configuration. Their identity and progress are tied to one durable operation, not to a browser connection.
+
+Set `SERVICES_PROJECT_NAME` if Services' own Compose project is not named `services`. Self-updates use the same worker handoff: validate and pull before replacing the dashboard, reject an image without the compatible `io.services.worker.protocol=1` label before applying, then verify the replacement image and application readiness before reporting completion. The dashboard reconnects automatically after the interruption; a lost connection is not evidence of success or failure. The `/api/ready` endpoint is used by the supplied image's Docker health check. Worker readiness probes currently require the internal HTTP port to remain **8080**; the externally published port may be changed.
+
+On startup, Services reconciles saved work with its Docker workers before starting more updates. Waiting jobs retain their order. A surviving worker is not launched again. Interrupted work with an uncertain result must not be blindly replayed or reported as successful. Docker or storage failures must not silently create a new empty queue or authorize overlapping mutations.
+
+If a helper disappears or exits without a durable result, or application/verification fails after applying begins, the operation is marked **Interrupted** and the queue pauses. Check the affected project in Docker, review the recorded output and expected image IDs, and resolve any application problem before choosing **Acknowledge interruption**. The server checks that the operation's worker is absent or stopped before releasing this gate. Acknowledgement preserves the failed/uncertain result and does **not** retry the operation, mark it successful, or perform rollback; it permits other queued work to resume.
+
+**Initial installation:** installing this feature still requires an external Compose update, including the updated volume configuration. Subsequent self-updates require compatible durable-operation and worker protocols. Keep the data volume when replacing or updating Services: **do not use `docker compose down -v`** unless you deliberately want to delete the operation database. Back up the data volume when Services and its workers are stopped, or use a SQLite-aware online backup procedure; copying only the live database file is not a reliable backup.
+
+### Deployments with a networking sidecar
+
+If Services uses `network_mode: service:services-tailscale` (or another container owns its network namespace), keep that sidecar unchanged during in-app updates. Pin the sidecar image to its currently running **repository digest**, not a mutable `latest` tag. Digest-pinned images are not selected by Services' moving-tag update checks. Update the networking sidecar externally and recreate its dependent Services container together with it. The updater deliberately uses `--no-deps`; it is not a dependency-aware networking-sidecar rollout controller.
+
+Keep the internal Services port at 8080 for readiness checks; a sidecar may publish a different external port. The temporary worker does not need Tailnet credentials or a shared network namespace: replacement readiness is checked by executing a probe inside the replacement Services container through Docker.
 
 ### Shared Compose operation queue
 
-`POST /api/projects/{name}/update` returns **202 Accepted** with a JSON operation instead of a progress stream. Project updates run in FIFO submission order, one Compose mutation at a time, across all tabs and dashboard server instances in the process. A duplicate submission for an already queued or running project update returns **202 with the same operation ID**, without starting another update. Up to **32 waiting operations** are accepted in addition to the active action; further submissions return **429 Too Many Requests** (duplicates are still accepted).
+`POST /api/projects/{name}/update` returns **202 Accepted** only after the operation is committed, with a JSON operation instead of a progress stream. Project updates run in FIFO submission order, one Compose mutation at a time, across all tabs and dashboard server instances using the **same operation volume**. Separate installations/volumes are not coordinated. A duplicate submission for an already queued or running project update returns **202 with the same operation ID**, without starting another update. Up to **32 waiting operations** are accepted in addition to the active action; further submissions return **429 Too Many Requests** (duplicates are still accepted).
 
 - `GET /api/operations` returns `{ "operations": [...] }`, newest submitted first, including active legacy container actions.
 - `GET /api/operations/{id}` returns one operation, or **404** for an unknown or evicted ID. Both read endpoints disable caching.
-- An operation contains `id`, `project`, `action` (`update project`, `pull`, or `update`), `state` (`queued`, `running`, `complete`, or `error`), ISO-8601 UTC `queuedAt`, `messages`, and `queuePosition` (1-based while waiting, otherwise 0). `startedAt`, `finishedAt`, and `error` appear when applicable. Poll the list about every two seconds and an individual active operation about every second; only a terminal state confirms the result.
+- `POST /api/operations/{id}/acknowledge` acknowledges an operator-reviewed interrupted result. It requires the same origin/allowed-host checks as update submission and verifies the worker is no longer active. It does not resubmit the action.
+- An optional `Idempotency-Key` header coalesces retries of the same request across restarts, including a completed request while retained. Reusing a key for a different action returns **409**.
+- Idempotency keys are retained as replay-prevention tombstones even after their operation history is evicted; a key for an evicted operation returns **409** rather than starting the action again. This ledger is not currently pruned, so bounded operation history does not imply a fixed-size database. Monitor free space on the data volume.
+- An operation contains `id`, `project`, `action` (`update project`, `pull`, or `update`), `state` (`queued`, `running`, `complete`, or `error`), ISO-8601 UTC `queuedAt`, `messages`, and `queuePosition` (1-based while waiting, otherwise 0). `startedAt`, `finishedAt`, and `error` appear when applicable. Recovery metadata includes `phase`, `selfUpdate`, `needsAttention`, a temporary `worker` identity, and `expectedImages` (selected service names mapped to pulled image IDs). Poll the list about every two seconds and an individual active operation about every second; only a terminal state confirms the recorded result. `error` with `needsAttention` means the outcome remains uncertain and the queue is paused.
 
-The server rechecks live Docker inventory, registry update status, and self-update protection **when execution starts**, not from the inventory shown when submitted. A project that disappeared, no longer has an available update, or cannot be checked against Docker becomes an `error` operation. Failure releases the queue so later projects can continue. Each executing project operation has a 15-minute background context, independent of browser disconnection; there is no browser cancellation or rollback.
+Execution rechecks live Docker inventory, registry update status, and project identity **when execution starts**, not from the inventory shown when submitted. A project that disappeared, no longer has an available update, or cannot be checked against Docker becomes an `error` operation. Each executing operation has a bounded worker-owned lifetime, independent of browser or dashboard disconnection; there is no browser cancellation or automatic rollback. Uncertain execution outcomes require reconciliation rather than an automatic retry.
 
-Legacy container pull/update endpoints retain their NDJSON progress and explicit terminal records. They share the same serialization, appear in operation activity once execution begins, and return **409 Conflict** while the queue is busy; they cannot jump ahead of queued projects.
+Legacy container pull/update endpoints now submit through the same durable FIFO and retain NDJSON progress with explicit terminal records. The first `accepted` record carries an `operationId`; only `complete` confirms success, and `error` reports a recorded failure. A stream lost during a dashboard restart is not a terminal result: look up the saved operation. These actions cannot jump ahead of queued projects.
 
-Queue and activity are **in memory, not durable across process restarts**. Keep at most 100 terminal operations plus queued/running operations. Each operation retains its newest 200 progress messages, with each message and terminal error limited to 4,096 UTF-8 bytes. Older output and terminal history are discarded. This is bounded operational visibility, not an audit log or a guarantee that every command line is retained.
+Queue and activity are **durable in the configured data volume**. Keep at most 100 resolved terminal operations plus queued/running operations and unresolved interruptions. Each operation retains its newest 200 progress messages, with each message and terminal error limited to 4,096 UTF-8 bytes. Older output and terminal history are discarded. This is bounded operational visibility, not an audit log or a guarantee that every command line is retained. Deleting the volume deletes this history and pending work.
 
 ## Run
 
@@ -69,6 +94,9 @@ Configure these environment variables (for example in a local `.env` file):
 | `SERVICES_PUBLIC_ORIGIN` | Exact browser origin when using a TLS-terminating proxy, e.g. `https://services.example.net` (no trailing slash). |
 | `SERVICES_WEBHOOK_URL` | Optional generic JSON notification receiver. |
 | `SERVICES_PROJECT_NAME` | Services' own Compose project name; defaults to `services`. |
+| `SERVICES_DATA_DIR` | Must be `/data` backed by a writable named volume for durable workers. The supplied image initializes this directory for its non-root user. |
+| `SERVICES_SERVICE_NAME` | Optional Services Compose service identity; defaults to `services`. Configure custom deployments explicitly. |
+| `SERVICES_CONTAINER_NAME` | Optional container identity used for inspection; otherwise uses Docker's `HOSTNAME`. Needed if a custom hostname prevents self-discovery. |
 | `DOCKER_SOCKET` | Unix socket path inside the Services container; defaults to `/var/run/docker.sock`. |
 | `LISTEN_ADDR` | HTTP listen address; defaults to `:8080`. |
 
@@ -99,7 +127,7 @@ go build ./cmd/services
 
 The Go server serves `web/dist`. Run `go run ./cmd/services` after building the frontend. Native Windows development can exercise API and UI behavior, but the production Docker connector uses a Unix socket inside the Linux container.
 
-Tests use local Docker/registry HTTP fixtures and fake Compose runners; they do not update your real applications. Real socket permissions, mounted project paths, registry credentials/availability, and actual Compose recreation must also be verified on the target host.
+Tests use local Docker/registry HTTP fixtures and fake Compose runners; they do not update your real applications. Storage tests reopen real temporary databases. Worker and recovery tests must cover duplicate submission, dashboard restart, missing/stopped workers, and uncertain results as well as normal completion. Real socket permissions, named-volume ownership, mounted project paths, registry credentials/availability, and actual Compose recreation must also be verified on the target host.
 
 ## Versioning and publishing
 

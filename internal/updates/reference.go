@@ -22,7 +22,7 @@ type imageReference struct {
 
 func parseReference(image string) (imageReference, error) {
 	image = strings.TrimSpace(image)
-	if image == "" {
+	if image == "" || strings.HasPrefix(image, "sha256:") {
 		return imageReference{}, errUnsupportedImage
 	}
 	if strings.Contains(image, "@") {

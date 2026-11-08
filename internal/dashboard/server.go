@@ -17,6 +17,7 @@ import (
 	"services/internal/composeupdate"
 	"services/internal/groups"
 	"services/internal/monitor"
+	"services/internal/operations"
 )
 
 type ContainerSource interface {
@@ -43,14 +44,19 @@ type originAuthority struct {
 }
 
 type Server struct {
-	source       ContainerSource
-	actionSource ContainerSource
-	updates      UpdateApplier
-	updater      ServiceUpdater
-	allowedHosts map[string]struct{}
-	publicOrigin *originAuthority
-	version      int
-	mux          *http.ServeMux
+	acknowledgeOperation func(context.Context, string) error
+	durable              *operations.Store
+	durableProduction    bool
+	durableProject       string
+	mutationError        error
+	source               ContainerSource
+	actionSource         ContainerSource
+	updates              UpdateApplier
+	updater              ServiceUpdater
+	allowedHosts         map[string]struct{}
+	publicOrigin         *originAuthority
+	version              int
+	mux                  *http.ServeMux
 }
 
 func New(source ContainerSource, version int) *Server {
@@ -92,8 +98,10 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 		allowed[publicOrigin.host] = struct{}{}
 	}
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
+	s.mux.HandleFunc("GET /api/ready", s.ready)
 	s.mux.HandleFunc("GET /api/operations", s.operations)
 	s.mux.HandleFunc("GET /api/operations/{id}", s.operation)
+	s.mux.HandleFunc("POST /api/operations/{id}/acknowledge", s.acknowledge)
 	s.mux.HandleFunc("GET /api/projects", s.projects)
 	s.mux.HandleFunc("GET /api/monitor", s.monitorInfo)
 	s.mux.HandleFunc("POST /api/projects/{name}/update", s.projectUpdate)
@@ -188,6 +196,10 @@ func (s *Server) updateContainer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action string) {
 	if !s.sameOriginAllowed(r) {
 		http.Error(w, "Cross-origin action rejected", http.StatusForbidden)
+		return
+	}
+	if s.durableProduction {
+		s.durableContainerAction(w, r, action)
 		return
 	}
 	if s.updater == nil {

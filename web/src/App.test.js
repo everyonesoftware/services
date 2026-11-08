@@ -63,6 +63,43 @@ test('Docker activity distinguishes running work, FIFO queue, results and stale 
   assert.doesNotMatch(loading, /No Compose work/)
 })
 
+test('durable activity explains retention and identifies interrupted operations without claiming success', () => {
+  const operation = { id: 'persisted-id', project: 'site', action: 'update project', state: 'error', phase: 'interrupted', queuedAt: '2026-11-08T12:00:00Z', messages: ['Last recorded output'], error: 'Execution outcome could not be confirmed' }
+  const html = renderToStaticMarkup(createElement(components.DockerActivity, { operations: [operation], loading: false, error: '' }))
+  assert.match(html, /Interrupted/)
+  assert.match(html, /Execution outcome could not be confirmed/)
+  assert.match(html, /Queue and recent output survive Services restarts/)
+  assert.doesNotMatch(html, /reset when Services restarts|Completed/)
+})
+
+test('self-update disconnect preserves the operation and explains automatic reconnection honestly', () => {
+  const operation = { id: 'self-update-id', project: 'custom-services', action: 'update project', state: 'running', phase: 'verifying', selfUpdate: true, queuedAt: '2026-11-08T12:00:00Z', messages: ['Waiting for replacement readiness'] }
+  const html = renderToStaticMarkup(createElement(components.DockerActivity, { operations: [operation], loading: false, error: 'Failed to fetch' }))
+  assert.match(html, /Services is restarting or temporarily unreachable/)
+  assert.match(html, /Reconnecting automatically/)
+  assert.match(html, /Waiting for replacement readiness/)
+  assert.match(html, /Verifying/)
+  assert.doesNotMatch(html, /Completed|update succeeded/i)
+})
+
+test('update review explains durable independent execution without promising automatic retry', () => {
+  const html = renderToStaticMarkup(createElement(components.UpdateDialog, { project: fixture, onClose: () => {}, onUpdated: () => {} }))
+  assert.match(html, /survive Services restarts/)
+  assert.match(html, /independent worker/)
+  assert.doesNotMatch(html, /held in memory|lost if Services restarts|automatically retried/)
+})
+
+test('interrupted results keep the queue pause and acknowledgement visible outside collapsed history', () => {
+  const operation = { id: 'interrupted-id', project: 'site', action: 'update project', state: 'error', phase: 'interrupted', needsAttention: true, queuedAt: '2026-11-08T12:00:00Z', messages: [], error: 'Outcome unknown' }
+  const html = renderToStaticMarkup(createElement(components.DockerActivity, { operations: [operation], loading: false, error: '' }))
+  assert.match(html, /Queue paused/)
+  assert.match(html, /Acknowledge interruption/)
+  assert.match(html, /Check the project in Docker before acknowledging/)
+  assert.ok(html.indexOf('Queue paused') < html.indexOf('operation-history'))
+  const stale = renderToStaticMarkup(createElement(components.DockerActivity, { operations: [operation], loading: false, error: 'Offline' }))
+  assert.match(stale, /disabled=""[^>]*>Acknowledge interruption/)
+})
+
 test('monitor keeps secondary information collapsed and omits promotional copy', () => {
   const html = renderToStaticMarkup(createElement(components.default))
   assert.match(html, /<details class="monitor-details"><summary>Monitor details<\/summary>/)

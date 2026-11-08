@@ -24,13 +24,16 @@ export type Project = { name: string; status: string; updateAvailable?: boolean;
 export type Incident = { id: string; project: string; service: string; name: string; status: string; reason: string; since: string }
 export type MonitorEvent = { id: string; project: string; name: string; kind: string; message: string; time: string }
 export type Monitor = { connected: boolean; lastChecked: string | null; error: string | null; incidents: Incident[]; events: MonitorEvent[]; notificationConfigured: boolean }
-export type UpdateEvent = { type: 'progress' | 'complete' | 'error'; message: string }
+export type UpdateEvent = { type: 'accepted' | 'progress' | 'complete' | 'error'; message: string; operationId?: string }
 export type Filter = 'all' | 'attention' | 'updates'
 export type Operation = {
   id: string
   project: string
   action: string
   state: 'queued' | 'running' | 'complete' | 'error'
+  phase?: string
+  selfUpdate?: boolean
+  needsAttention?: boolean
   queuedAt: string
   startedAt?: string
   finishedAt?: string

@@ -56,6 +56,9 @@ type imageSummary struct {
 }
 
 type containerInspect struct {
+	Config struct {
+		Image string `json:"Image"`
+	} `json:"Config"`
 	RestartCount int `json:"RestartCount"`
 	State        struct {
 		StartedAt string `json:"StartedAt"`
@@ -106,6 +109,11 @@ func (c *Client) ContainersContext(ctx context.Context) ([]groups.Container, err
 	}
 	containers := make([]groups.Container, 0, len(summaries))
 	for _, summary := range summaries {
+		// Temporary executors are represented by their durable operations, not as
+		// application failures when a completed helper exits.
+		if summary.Labels["io.services.worker"] == "true" {
+			continue
+		}
 		state := summary.State
 		if len(summary.Names) > 0 {
 			// Keep a stable display name without Docker's leading slash.
@@ -130,6 +138,11 @@ func (c *Client) ContainersContext(ctx context.Context) ([]groups.Container, err
 			return nil, fmt.Errorf("inspect container %s: %w", summary.ID, err)
 		}
 		container.RestartCount = inspect.RestartCount
+		// A local pull can move the configured tag away from a running image;
+		// Docker then returns an image ID in the summary instead of that tag.
+		if strings.HasPrefix(summary.Image, "sha256:") && inspect.Config.Image != "" {
+			container.Image = inspect.Config.Image
+		}
 		container.StartedAt = inspect.State.StartedAt
 		container.ExitCode = inspect.State.ExitCode
 		container.OOMKilled = inspect.State.OOMKilled

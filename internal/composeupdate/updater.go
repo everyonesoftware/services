@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"services/internal/groups"
 )
@@ -345,22 +346,28 @@ func (r execRunner) Run(ctx context.Context, workingDir string, composeArgs []st
 	args = append(args, composeArgs...)
 	reportProgress(ctx, "Running: docker "+strings.Join(args, " "))
 	command := exec.CommandContext(ctx, "docker", args...)
+	// Compose can spawn a CLI plugin that inherits these pipes. Bound drain
+	// time after cancellation even when a descendant outlives the CLI process.
+	command.WaitDelay = time.Second
 	command.Dir = workingDir
 	command.Env = composeEnvironment(os.Environ())
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("capture docker compose output: %w", err)
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("capture docker compose errors: %w", err)
-	}
+	stdout, stdoutWriter := io.Pipe()
+	stderr, stderrWriter := io.Pipe()
+	defer stdout.Close()
+	defer stderr.Close()
+	defer stdoutWriter.Close()
+	defer stderrWriter.Close()
+	// Let os/exec own the child-side copy goroutines. Its WaitDelay can then
+	// close inherited OS pipes on cancellation while these readers drain safely.
+	command.Stdout = stdoutWriter
+	command.Stderr = stderrWriter
 	if err := command.Start(); err != nil {
 		return fmt.Errorf("docker compose command failed: %w", err)
 	}
 	var output sync.WaitGroup
-	stream := func(reader io.Reader, label string) {
+	stream := func(reader *io.PipeReader, label string) {
 		defer output.Done()
+		defer reader.Close()
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 4096), 1024*1024)
 		for scanner.Scan() {
@@ -374,6 +381,8 @@ func (r execRunner) Run(ctx context.Context, workingDir string, composeArgs []st
 	go stream(stdout, "stdout")
 	go stream(stderr, "stderr")
 	runErr := command.Wait()
+	stdoutWriter.Close()
+	stderrWriter.Close()
 	output.Wait()
 	if runErr != nil {
 		return fmt.Errorf("docker compose command failed: %w", runErr)

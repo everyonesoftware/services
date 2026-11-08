@@ -5,25 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"services/internal/operations"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 )
 
-// Operation is a process-local Compose action shared by all dashboard clients.
-type Operation struct {
-	ID            string   `json:"id"`
-	Project       string   `json:"project"`
-	Action        string   `json:"action"`
-	State         string   `json:"state"`
-	QueuedAt      string   `json:"queuedAt"`
-	StartedAt     string   `json:"startedAt,omitempty"`
-	FinishedAt    string   `json:"finishedAt,omitempty"`
-	Messages      []string `json:"messages"`
-	Error         string   `json:"error,omitempty"`
-	QueuePosition int      `json:"queuePosition"`
-}
+// Operation is the shared durable Compose action API.
+type Operation = operations.Operation
 
 type composeJob struct {
 	operation Operation
@@ -203,6 +193,10 @@ func (s *Server) tryComposeAction(_ string) (func(), bool) {
 }
 
 func (s *Server) operations(w http.ResponseWriter, _ *http.Request) {
+	if s.durableProduction {
+		s.durableOperations(w)
+		return
+	}
 	q := composeOperations
 	q.mu.Lock()
 	operations := make([]Operation, 0, len(q.history))
@@ -216,6 +210,10 @@ func (s *Server) operations(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) operation(w http.ResponseWriter, r *http.Request) {
+	if s.durableProduction {
+		s.durableOperation(w, r)
+		return
+	}
 	q := composeOperations
 	q.mu.Lock()
 	for _, job := range q.history {

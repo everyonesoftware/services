@@ -38,6 +38,10 @@ func (s *Server) projectUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	project := r.PathValue("name")
+	if s.durableProduction {
+		s.submitDurable(w, r, project, "update project", "", false)
+		return
+	}
 	if message, status := projectUpdateGuard(project); status != 0 {
 		http.Error(w, message, status)
 		return

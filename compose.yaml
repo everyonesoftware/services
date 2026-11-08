@@ -14,6 +14,7 @@ services:
     environment:
       LISTEN_ADDR: ":8080"
       DOCKER_SOCKET: /var/run/docker.sock
+      SERVICES_DATA_DIR: /data
       SERVICES_ALLOWED_HOSTS: ${SERVICES_ALLOWED_HOSTS:-}
       SERVICES_PUBLIC_ORIGIN: ${SERVICES_PUBLIC_ORIGIN:-}
       SERVICES_WEBHOOK_URL: ${SERVICES_WEBHOOK_URL:-}
@@ -21,6 +22,7 @@ services:
       SERVICES_COMPOSE_HOST_ROOT: ${SERVICES_COMPOSE_HOST_ROOT:-E:/Containers}
       SERVICES_COMPOSE_MOUNT_ROOT: ${SERVICES_COMPOSE_MOUNT_ROOT:-/run/desktop/mnt/host/e/Containers}
     volumes:
+      - services-data:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - type: bind
         source: "${SERVICES_COMPOSE_HOST_ROOT:-E:/Containers}"
@@ -28,3 +30,6 @@ services:
         read_only: true
         bind:
           create_host_path: false
+
+volumes:
+  services-data:

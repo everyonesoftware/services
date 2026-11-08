@@ -52,3 +52,18 @@ test('update stream handles fragmented NDJSON and unterminated final complete ev
   assert.deepEqual(events.map(event => event.type), ['progress', 'complete'])
   assert.equal(events[0].message, 'Pulling image')
 })
+
+test('durable stream accepts an operation receipt without mistaking it for completion', async () => {
+  const events = []
+  await api.consumeUpdateStream(stream('{"type":"accepted","message":"Queued","operationId":"persisted-id"}\n{"type":"complete","message":"Verified"}\n'), event => events.push(event))
+  assert.equal(events[0].operationId, 'persisted-id')
+  assert.deepEqual(events.map(event => event.type), ['accepted', 'complete'])
+  await assert.rejects(api.consumeUpdateStream(stream('{"type":"accepted","message":"Queued","operationId":"persisted-id"}\n'), () => {}), /before completion/i)
+})
+
+test('acknowledgement uses its dedicated endpoint and preserves rejection details', async () => {
+  const requests = []
+  await api.acknowledgeOperation('compose/test', async (url, options) => { requests.push([url, options.method]); return Response.json({ state: 'error', needsAttention: false }) })
+  assert.deepEqual(requests, [['/api/operations/compose%2Ftest/acknowledge', 'POST']])
+  await assert.rejects(api.acknowledgeOperation('operation', async () => new Response('Helper is still active', { status: 409 })), /Helper is still active/)
+})

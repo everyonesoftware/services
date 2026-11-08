@@ -29,6 +29,16 @@ func main() {
 	if socket == "" {
 		socket = "/var/run/docker.sock"
 	}
+	id, worker, modeErr := parseMode(os.Args[1:])
+	if modeErr != nil {
+		log.Fatal(modeErr)
+	}
+	if worker {
+		if err := runWorker(id, socket); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -50,6 +60,7 @@ func main() {
 		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
 	}
 	handler.SetActionSource(source)
+	configureOperations(ctx, handler, socket)
 	go checker.Run(ctx, source)
 	server := &http.Server{
 		Addr:              addr,

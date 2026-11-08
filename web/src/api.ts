@@ -5,6 +5,11 @@ export async function checkForUpdates(fetcher: typeof fetch = fetch): Promise<vo
   if (!response.ok) throw new Error((await response.text()).trim() || `Image check failed (${response.status})`)
 }
 
+export async function acknowledgeOperation(id: string, fetcher: typeof fetch = fetch): Promise<void> {
+  const response = await fetcher(`/api/operations/${encodeURIComponent(id)}/acknowledge`, { method: 'POST', signal: AbortSignal.timeout(15_000) })
+  if (!response.ok) throw new Error((await response.text()).trim() || `Acknowledgement failed (${response.status})`)
+}
+
 export async function updateProject(name: string, fetcher: typeof fetch = fetch, timeoutMs = 12_000): Promise<Operation> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -39,7 +44,7 @@ export async function consumeUpdateStream(response: Response, onEvent: (event: U
     if (!line.trim()) return
     let event: UpdateEvent
     try { event = JSON.parse(line) as UpdateEvent } catch { throw new Error('Invalid update event received') }
-    if (!event || !['progress', 'complete', 'error'].includes(event.type) || typeof event.message !== 'string') throw new Error('Invalid update event received')
+    if (!event || !['accepted', 'progress', 'complete', 'error'].includes(event.type) || typeof event.message !== 'string') throw new Error('Invalid update event received')
     onEvent(event)
     if (event.type === 'error') throw new Error(event.message || 'Update failed')
     if (event.type === 'complete') complete = true
