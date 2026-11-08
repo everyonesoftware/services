@@ -58,7 +58,7 @@ Configure these environment variables (for example in a local `.env` file):
 | `DOCKER_SOCKET` | Unix socket path inside the Services container; defaults to `/var/run/docker.sock`. |
 | `LISTEN_ADDR` | HTTP listen address; defaults to `:8080`. |
 
-For Linux, override the two roots with your real application root and adjust the Compose bind mount accordingly, e.g. both `/srv/containers`. Docker Desktop paths must be verified on the target installation. Top-level working directories and Compose files outside the configured root are rejected.
+For Linux, override the two roots with your real application root and adjust the Compose bind mount accordingly, e.g. both `/srv/containers`. Docker Desktop paths must be verified on the target installation. Top-level working directories and Compose files outside the configured root are rejected. On Docker Desktop, labels may use either the Windows host root or its configured Unix mount root; both resolve to the same mounted project. This supports projects whose services were created from both Windows and inside Services without broadening the allowed filesystem boundary.
 
 ### Security boundary
 

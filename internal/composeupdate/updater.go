@@ -1,10 +1,11 @@
 package composeupdate
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -12,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"log"
 
 	"services/internal/groups"
 )
@@ -30,7 +30,9 @@ func WithProgress(ctx context.Context, progress ProgressFunc) context.Context {
 
 func reportProgress(ctx context.Context, line string) {
 	log.Printf("Compose progress: %s", line)
-	if progress, ok := ctx.Value(progressKey{}).(ProgressFunc); ok && progress != nil { progress(line) }
+	if progress, ok := ctx.Value(progressKey{}).(ProgressFunc); ok && progress != nil {
+		progress(line)
+	}
 }
 
 type Updater struct {
@@ -199,10 +201,22 @@ func (u *Updater) resolveProjectPath(hostPath string, wantDirectory bool) (strin
 	if err != nil {
 		return "", fmt.Errorf("Compose host path: %w", err)
 	}
-	if windowsPaths != candidateUsesWindowsPaths {
-		return "", fmt.Errorf("Compose host path does not use the configured root's path format")
+	var relative string
+	if windowsPaths && !candidateUsesWindowsPaths {
+		// Compose invoked inside Services writes labels in the mounted Unix
+		// namespace; host-launched siblings retain their Windows labels.
+		// Accept only the configured mount alias, never arbitrary Unix paths.
+		mountAlias, aliasWindowsPaths, aliasErr := normalizeHostPath(u.mountRoot)
+		if aliasErr != nil || aliasWindowsPaths {
+			return "", fmt.Errorf("Compose host path does not use the configured root's path format")
+		}
+		relative, err = relativeHostPath(mountAlias, candidate, false)
+	} else {
+		if windowsPaths != candidateUsesWindowsPaths {
+			return "", fmt.Errorf("Compose host path does not use the configured root's path format")
+		}
+		relative, err = relativeHostPath(hostRoot, candidate, windowsPaths)
 	}
-	relative, err := relativeHostPath(hostRoot, candidate, windowsPaths)
 	if err != nil {
 		return "", err
 	}
@@ -334,24 +348,36 @@ func (r execRunner) Run(ctx context.Context, workingDir string, composeArgs []st
 	command.Dir = workingDir
 	command.Env = composeEnvironment(os.Environ())
 	stdout, err := command.StdoutPipe()
-	if err != nil { return fmt.Errorf("capture docker compose output: %w", err) }
+	if err != nil {
+		return fmt.Errorf("capture docker compose output: %w", err)
+	}
 	stderr, err := command.StderrPipe()
-	if err != nil { return fmt.Errorf("capture docker compose errors: %w", err) }
-	if err := command.Start(); err != nil { return fmt.Errorf("docker compose command failed: %w", err) }
+	if err != nil {
+		return fmt.Errorf("capture docker compose errors: %w", err)
+	}
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("docker compose command failed: %w", err)
+	}
 	var output sync.WaitGroup
 	stream := func(reader io.Reader, label string) {
 		defer output.Done()
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 4096), 1024*1024)
-		for scanner.Scan() { reportProgress(ctx, label+": "+scanner.Text()) }
-		if err := scanner.Err(); err != nil { reportProgress(ctx, "Output read error: "+err.Error()) }
+		for scanner.Scan() {
+			reportProgress(ctx, label+": "+scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			reportProgress(ctx, "Output read error: "+err.Error())
+		}
 	}
 	output.Add(2)
 	go stream(stdout, "stdout")
 	go stream(stderr, "stderr")
 	runErr := command.Wait()
 	output.Wait()
-	if runErr != nil { return fmt.Errorf("docker compose command failed: %w", runErr) }
+	if runErr != nil {
+		return fmt.Errorf("docker compose command failed: %w", runErr)
+	}
 	return nil
 }
 
