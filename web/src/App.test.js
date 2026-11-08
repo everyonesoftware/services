@@ -38,6 +38,23 @@ test('update review names exact services and digests with downtime warning, nati
   assert.doesNotMatch(html, /updated successfully/)
 })
 
+test('monitor keeps secondary information collapsed and omits promotional copy', () => {
+  const html = renderToStaticMarkup(createElement(components.default))
+  assert.match(html, /<details class="monitor-details"><summary>Monitor details<\/summary>/)
+  assert.match(html, /<details class="activity"[^>]*><summary[^>]*>Recent activity/)
+  assert.doesNotMatch(html, /YOUR INFRASTRUCTURE|Service health, changes|Problems first|A quieter view/)
+})
+
+test('healthy rows avoid redundant health prose and duplicate container names', () => {
+  const container = { ...fixture.containers[0], name: 'web', health: 'healthy', monitorStatus: 'healthy', monitorReason: 'Health check passing', updateAvailable: false }
+  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { name: 'site', containers: [container] }, onReview: () => {}, actionsDisabled: false }))
+  const summary = html.match(/<summary class="container-summary">([\s\S]*?)<\/summary>/)[1]
+  assert.doesNotMatch(summary, /Health check passing/)
+  assert.doesNotMatch(summary, /<span>web<\/span>/)
+  assert.match(summary, /nginx:stable/)
+  assert.match(summary, /Healthy/)
+})
+
 test('monitor starts honestly connecting, with accessible search and filters, not a connected claim or fabricated counts', () => {
   const html = renderToStaticMarkup(createElement(components.default))
   assert.match(html, /<h1>Monitor<\/h1>/)
