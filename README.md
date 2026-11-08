@@ -1,62 +1,92 @@
 # Services
 
-Services is a Compose-first dashboard for monitoring the current health of Compose projects on one Docker Engine.
+A home-server monitoring console for one Docker Engine. Problems are shown first; applications are grouped by Compose project; image updates are always opt-in.
 
-## Current implementation
+## Monitoring
 
-- Groups containers by Docker Compose project/service labels.
-- Aggregates project health from each container's running state and configured Docker health check.
-- Refreshes the dashboard every 30 seconds.
-- Reads container image repository digests from Docker Engine and checks public Docker Hub and GHCR tags.
-- Checks each supported running image at startup and every six hours, comparing the configured tag's registry manifest digest with the running image's recorded digest; failed registry checks retry after 15 minutes.
-- Shows each container's name, image, truncated current tag, and running/health/update status; the full tag remains available on hover.
-- Clicking an update pill opens a side-by-side current/proposed digest comparison with **Cancel**, **Pull**, and **Update** actions.
-- Checks the exact configured tag, including `latest`; digest-pinned, private, unsupported-registry, and images without a matching local repository digest cannot be reported as updated.
-- Compose projects with no configured health checks are shown as **Running**; projects with configured checks that pass are shown as **Healthy**.
-- Unlabelled, non-Compose containers are not shown.
+Monitoring runs on the server, not in a browser tab. The dashboard shows active incidents, container diagnostics, and recent changes.
 
-Registry detection is read-only. A changed manifest digest means the configured tag now points to a different image; tags are not semantically ordered, so this does not claim a version-number comparison. **Cancel** only dismisses the dialog. **Pull** downloads the selected service's image and leaves its running container unchanged. **Update** pulls, then runs `docker compose up -d --no-deps --pull never --no-build --wait --wait-timeout 300 <service>`; the dialog closes only after Compose reports the service running/healthy. Errors leave the dialog open. Updating recreates every replica of that Compose service and applies the current Compose files and `.env` values for that service; it does not rebuild images or start dependencies.
+- Docker health checks are used when configured. A failed check is a problem even while the process is running.
+- Without a health check, Services monitors container state and restart activity. **Running** means the process is up; it does not claim the application is responding correctly.
+- Repeated restarts and observed container replacements are tracked over a five-minute window for applications without health checks, including containers that happen to be running when sampled. A configured Docker health check remains authoritative while running; restart counts remain visible as diagnostics.
+- Stopped, restarting, dead, paused, and out-of-memory-killed applications need attention. Successful Compose one-off jobs are distinguished from failed applications.
+- Non-Compose containers appear under **Standalone** and cannot be updated through Compose actions.
+- Docker outages are shown separately from application failures. The last successful inventory stays visible and is marked stale; it is not presented as a live healthy result.
+- Active incidents and recent history are in memory. They reset when Services restarts. Polling is not an exhaustive Docker event log: containers created and removed entirely between polls may not be observed.
 
-## CI and GHCR publishing
+### Notifications
 
-`.github/workflows/verify-and-publish.yml` runs the frontend build, Go tests, and Docker image build for pull requests and pushes. Pushes to the default branch or a `v*` tag publish `ghcr.io/everyonesoftware/services` with the numeric version, `latest` (default branch), branch/tag, and commit-SHA tags. Pull requests run verification only. Publishing uses the workflow's `GITHUB_TOKEN` with package-write permission; no personal token is needed in repository secrets.
+Set `SERVICES_WEBHOOK_URL` to an HTTP(S) endpoint that accepts a JSON POST to receive problem and recovery events even when the dashboard is closed. An event has `id`, `project`, `name`, `kind`, `message`, and `time` fields. This is a generic webhook, not a Discord/Slack-specific payload; use a compatible receiver or an automation bridge.
 
-## Version number
+Unchanged incidents are deduplicated. Failed deliveries are retried within the running process. No webhook is configured by default; without one, alerts are available in the dashboard only. Delivery history is not durable across restarts. Keep token-bearing webhook URLs secret and prefer HTTPS outside a trusted network.
 
-The displayed version is the number of Git commits reachable from the build's `HEAD`. CI checks out full history, calculates that integer, injects it into the app, and uses it as an additional GHCR tag. Compose defaults the image tag to `latest`; its build argument still defaults to integer `0` unless `APP_VERSION` is supplied. For a local Docker Desktop build in PowerShell, calculate the commit count so the dashboard version and image tag match:
+## Image updates
 
-```powershell
-$env:APP_VERSION = (git rev-list --count HEAD).Trim()
-docker compose up --build -d
-```
+Services checks public Docker Hub and GHCR image tags at startup and periodically (six hours; failed checks retry after fifteen minutes). **Check for updates** requests an immediate check. It compares the configured tag's remote manifest digest with the running image's repository digest—not version numbers.
 
-## Run with Docker Desktop
+Unsupported registries, digest-pinned images, missing repository digests, and registry failures are explicitly distinguished from an up-to-date image. Private-registry authentication is not supported. Updates to a different tag, such as moving from `1` to `2`, require editing your Compose configuration yourself.
 
-From this project directory in PowerShell (sets the image tag and dashboard version to the current commit count):
+Choose **Review update** on a Compose group to see the changed services and digests, then explicitly confirm the update. The server deduplicates replicas and updates changed Compose services together:
 
-```powershell
-$env:APP_VERSION = (git rev-list --count HEAD).Trim()
-docker compose up --build -d
-```
+1. Validate the project's paths and selected service configuration.
+2. Pull the selected services' current tags.
+3. Run `docker compose up -d --no-deps --pull never --no-build --wait --wait-timeout 300` for those services.
+4. Report success only when Compose reports completion; stream failures and command progress to the dialog.
 
-Open `http://localhost:8080` or the server's Tailnet address on port 8080. No separate login is included; use Tailnet ACLs and avoid publishing this port to the public internet.
+This recreates containers and can cause downtime. It uses the Compose files and `.env` values on disk at execution time. Mutable tags may change between review and pull. No builds, dependency startup, volume removal, automatic updates, or automatic rollback are performed. Back up application data before updating. Compose operations are serialized to prevent overlapping updates. Closing a browser does not roll an update back. The Services project is protected from self-update; update Services externally with Compose instead. Set `SERVICES_PROJECT_NAME` if its Compose project is not named `services`.
 
-Pull and Update actions also restrict the request host: loopback and Tailnet IP addresses are allowed by default. If you access the dashboard through a MagicDNS or custom hostname, set `SERVICES_ALLOWED_HOSTS` to a comma-separated list of exact hostnames (without scheme, path, or port); do not use wildcards. For example: `SERVICES_ALLOWED_HOSTS=services.your-tailnet.ts.net`.
+## Run
 
-If HTTPS terminates at Tailscale Serve or another trusted reverse proxy before reaching Services over HTTP, set `SERVICES_PUBLIC_ORIGIN` to the exact browser origin (scheme and host, no trailing slash), such as `https://services.your-tailnet.ts.net`. This makes the action check compare the browser's `Origin` against that configured value; it does not trust forwarded scheme headers. The configured hostname is automatically added to the allowed-host list. After changing the setting, recreate the container with `docker compose up -d --no-build`.
-
-The Compose file mounts `/var/run/docker.sock` so Services can query Docker Desktop's Linux Engine. `DOCKER_SOCKET`, if overridden, must be the Unix socket path inside the Services container; it is separate from the daemon-visible path used for Compose bind mounts. **The socket is highly privileged**: a read-only bind mount does not make Docker API access read-only. Status checks use read-only requests, while explicit **Pull** and **Update** actions use the socket to pull an image or recreate the selected Compose service. Anyone who can compromise Services may be able to control the Docker host through the socket. Keep the dashboard Tailnet-restricted and do not expose it publicly. Docker Desktop socket availability and mount behavior must be verified on the target installation.
-
-The Compose file mounts `E:/Containers` read-only at Docker Desktop's daemon-visible `/run/desktop/mnt/host/e/Containers` path. This lets the in-container Compose CLI resolve relative bind mounts using a path the Docker Engine can see. If your projects live elsewhere, set both `SERVICES_COMPOSE_HOST_ROOT` (the host path from container labels) and `SERVICES_COMPOSE_MOUNT_ROOT` (the corresponding Docker Desktop daemon-visible path) before `docker compose up`. The updater rejects labeled working directories and top-level Compose files outside that root. Compose may also follow project references such as `include`, `extends.file`, `env_file`, and file-backed `configs` or `secrets`; those references are not separately sandboxed, and configured provider commands may run inside the Services container. This is a trust boundary, not a sandbox: Compose configuration or provider commands can read files available to Services and use the privileged Docker socket. Keep references within the mounted root, only run actions for trusted projects, and ensure untrusted actors cannot modify project files during an action. Services never writes to the mounted project files; the read-only bind does not freeze host-side changes.
-
-Compose must read each selected project's configuration and `.env` files to resolve the service. Those files are therefore readable inside the Services container during an explicit **Pull** or **Update** action, although the bind mount is read-only. The Compose subprocess uses a fixed `PATH` and `/tmp` home directory instead of inheriting Services' environment or Docker credentials. The Docker socket remains highly privileged and permits engine changes despite its read-only bind mount; keep Services restricted to trusted Tailnet clients.
-
-## Development
+With Docker running, from this directory:
 
 ```sh
-cd web && npm ci && npm run build
-cd ..
-docker run --rm -v "$PWD:/src" -w /src golang:1.24 go test ./...
+docker compose up --build -d
 ```
 
-The Go build serves the generated frontend from `web/dist` and listens on port 8080.
+Open `http://localhost:8080`. The supplied Compose file targets Docker Desktop on Windows with application projects under `E:/Containers`.
+
+Configure these environment variables (for example in a local `.env` file):
+
+| Variable | Purpose |
+| --- | --- |
+| `SERVICES_COMPOSE_HOST_ROOT` | Root as written in container Compose labels; defaults to `E:/Containers`. |
+| `SERVICES_COMPOSE_MOUNT_ROOT` | Matching path visible to both Services and the Docker daemon; defaults to `/run/desktop/mnt/host/e/Containers`. |
+| `SERVICES_ALLOWED_HOSTS` | Additional exact hostnames allowed to perform actions, comma separated. Add your LAN hostname/IP if needed. |
+| `SERVICES_PUBLIC_ORIGIN` | Exact browser origin when using a TLS-terminating proxy, e.g. `https://services.example.net` (no trailing slash). |
+| `SERVICES_WEBHOOK_URL` | Optional generic JSON notification receiver. |
+| `SERVICES_PROJECT_NAME` | Services' own Compose project name; defaults to `services`. |
+| `DOCKER_SOCKET` | Unix socket path inside the Services container; defaults to `/var/run/docker.sock`. |
+| `LISTEN_ADDR` | HTTP listen address; defaults to `:8080`. |
+
+For Linux, override the two roots with your real application root and adjust the Compose bind mount accordingly, e.g. both `/srv/containers`. Docker Desktop paths must be verified on the target installation. Top-level working directories and Compose files outside the configured root are rejected.
+
+### Security boundary
+
+There is no built-in login. Keep Services behind Tailnet ACLs or an authenticated trusted proxy; do not expose port 8080 to the public internet. Mutation endpoints require a matching browser Origin and an allowed request hostname. Loopback and Tailnet IPs are allowed by default. These checks are not a replacement for authentication.
+
+**Docker socket access is effectively host-control access.** A read-only socket bind does not make API calls read-only. The application must be able to pull images and recreate containers. Anyone compromising Services could control Docker.
+
+The application-project bind is read-only, but Services must read trusted Compose and `.env` files. Referenced `include`, `extends`, `env_file`, configs, secrets, and Compose provider commands are not a separate sandbox. Restrict who can modify your project files and keep references inside the mounted root. Compose subprocesses use a fixed environment instead of inheriting application secrets. Configuration changes on the host are not frozen during an update.
+
+## Development and verification
+
+Requires Go 1.24+ and Node.js with npm.
+
+```sh
+cd web
+npm ci
+npm test
+npm run build
+cd ..
+go test ./...
+go vet ./...
+go build ./cmd/services
+```
+
+The Go server serves `web/dist`. Run `go run ./cmd/services` after building the frontend. Native Windows development can exercise API and UI behavior, but the production Docker connector uses a Unix socket inside the Linux container.
+
+Tests use local Docker/registry HTTP fixtures and fake Compose runners; they do not update your real applications. Real socket permissions, mounted project paths, registry credentials/availability, and actual Compose recreation must also be verified on the target host.
+
+## Versioning and publishing
+
+CI tests the frontend and Go packages and builds the container. Default-branch and `v*` tag pushes publish `ghcr.io/everyonesoftware/services`. The numeric build version is the Git commit count; `APP_VERSION` defaults to `0` for local builds. The Compose image tag defaults to `latest`.

@@ -5,13 +5,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"services/internal/composeupdate"
 	"services/internal/dashboard"
 	"services/internal/dockerapi"
+	"services/internal/monitor"
 	"services/internal/updates"
 )
 
@@ -31,6 +34,10 @@ func main() {
 		addr = ":8080"
 	}
 	source := dockerapi.NewUnixSocketClient(socket)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	watcher := monitor.New(source, monitor.NewWebhook(os.Getenv("SERVICES_WEBHOOK_URL")))
+	go watcher.Run(ctx)
 	checker := updates.NewChecker(updates.NewRegistryClient(nil), 0)
 	composeUpdater := composeupdate.New(
 		os.Getenv("SERVICES_COMPOSE_HOST_ROOT"),
@@ -38,16 +45,25 @@ func main() {
 		socket,
 	)
 	allowedHosts := strings.Split(os.Getenv("SERVICES_ALLOWED_HOSTS"), ",")
-	handler, err := dashboard.NewWithActionsAndPublicOrigin(source, checker, composeUpdater, version, allowedHosts, os.Getenv("SERVICES_PUBLIC_ORIGIN"))
+	handler, err := dashboard.NewWithActionsAndPublicOrigin(watcher, checker, composeUpdater, version, allowedHosts, os.Getenv("SERVICES_PUBLIC_ORIGIN"))
 	if err != nil {
 		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
 	}
-	go checker.Run(context.Background(), source)
+	handler.SetActionSource(source)
+	go checker.Run(ctx, source)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
+	}()
 	log.Printf("Services listening on %s", addr)
-	log.Fatal(server.ListenAndServe())
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }

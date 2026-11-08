@@ -8,13 +8,15 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"sync"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"services/internal/composeupdate"
 	"services/internal/groups"
+	"services/internal/monitor"
 )
 
 type ContainerSource interface {
@@ -42,6 +44,7 @@ type originAuthority struct {
 
 type Server struct {
 	source       ContainerSource
+	actionSource ContainerSource
 	updates      UpdateApplier
 	updater      ServiceUpdater
 	allowedHosts map[string]struct{}
@@ -90,12 +93,24 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 	}
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/projects", s.projects)
+	s.mux.HandleFunc("GET /api/monitor", s.monitorInfo)
+	s.mux.HandleFunc("POST /api/projects/{name}/update", s.projectUpdate)
 	s.mux.HandleFunc("POST /api/updates/check", s.checkUpdates)
 	s.mux.HandleFunc("GET /api/version", s.versionInfo)
 	s.mux.HandleFunc("POST /api/containers/{id}/pull", s.pullContainer)
 	s.mux.HandleFunc("POST /api/containers/{id}/update", s.updateContainer)
 	s.mux.Handle("GET /", http.FileServer(http.Dir("web/dist")))
 	return s
+}
+
+// SetActionSource makes mutation preflight read live Docker state, not a monitoring cache.
+// Configure before serving requests.
+func (s *Server) SetActionSource(source ContainerSource) { s.actionSource = source }
+func (s *Server) actionContainers() ([]groups.Container, error) {
+	if s.actionSource != nil {
+		return s.actionSource.Containers()
+	}
+	return s.source.Containers()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +149,17 @@ func (s *Server) versionInfo(w http.ResponseWriter, _ *http.Request) {
 	}{Version: s.version})
 }
 
+func (s *Server) monitorInfo(w http.ResponseWriter, _ *http.Request) {
+	source, ok := s.source.(interface{ Snapshot() monitor.Snapshot })
+	if !ok {
+		http.Error(w, "Monitoring is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(source.Snapshot())
+}
+
 func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 	containers, err := s.source.Containers()
 	if err != nil {
@@ -166,7 +192,13 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		http.Error(w, "Compose actions are not configured", http.StatusServiceUnavailable)
 		return
 	}
-	containers, err := s.source.Containers()
+	release, acquired := s.tryComposeAction("")
+	if !acquired {
+		http.Error(w, "Another Compose action is already running", http.StatusConflict)
+		return
+	}
+	defer release()
+	containers, err := s.actionContainers()
 	if err != nil {
 		http.Error(w, "Docker engine unavailable", http.StatusServiceUnavailable)
 		return
@@ -185,6 +217,14 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		http.Error(w, "Container not found", http.StatusNotFound)
 		return
 	}
+	selfProject := os.Getenv("SERVICES_PROJECT_NAME")
+	if selfProject == "" {
+		selfProject = "services"
+	}
+	if action == "update" && (!composeProjectName.MatchString(selfProject) || selected.Project == selfProject) {
+		http.Error(w, "The Services project cannot update itself; update it externally", http.StatusConflict)
+		return
+	}
 	if selected.State != "running" || (action == "pull" && !selected.UpdateAvailable) {
 		http.Error(w, "Container has no available update", http.StatusConflict)
 		return
@@ -199,7 +239,9 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 		streamMu.Lock()
 		defer streamMu.Unlock()
 		_ = encoder.Encode(map[string]string{"type": "progress", "message": message})
-		if flusher, ok := w.(http.Flusher); ok { flusher.Flush() }
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
 	}
 	progress("Starting Compose " + action + " for " + selected.Project + "/" + selected.Service)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -213,9 +255,11 @@ func (s *Server) containerAction(w http.ResponseWriter, r *http.Request, action 
 	if err != nil {
 		log.Printf("Compose %s failed for project %q service %q: %v", action, selected.Project, selected.Service, err)
 		progress("ERROR: " + err.Error())
+		_ = encoder.Encode(map[string]string{"type": "error", "message": err.Error()})
 		return
 	}
 	progress("Compose " + action + " completed successfully")
+	_ = encoder.Encode(map[string]string{"type": "complete", "message": "Compose " + action + " completed successfully"})
 }
 
 func (s *Server) sameOriginAllowed(r *http.Request) bool {

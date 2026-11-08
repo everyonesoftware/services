@@ -302,13 +302,15 @@ func hostPathParts(value string) []string {
 }
 
 func within(root, target string) bool {
-	// These paths are in the Services Linux-container namespace; filepath.Rel
-	// must use that case-sensitive namespace, not Windows host-label rules.
-	relative, err := filepath.Rel(root, target)
-	if err != nil || filepath.IsAbs(relative) {
-		return false
+	// filepath.Rel case-folds on Windows, which is not the namespace used by
+	// the Linux-mounted paths. Compare cleaned components case-sensitively on
+	// every host so a case-variant sibling can never pass the boundary check.
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if target == root {
+		return true
 	}
-	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	return strings.HasPrefix(target, strings.TrimRight(root, string(filepath.Separator))+string(filepath.Separator))
 }
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)

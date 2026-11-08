@@ -1,32 +1,28 @@
-# React + TypeScript + Vite
+# Services monitor frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite. The production dashboard reads live Docker snapshots from the Services backend; it contains no demo data.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Use Node 24 or newer (the Node test runner loads the TypeScript behavior helpers directly).
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm ci
+npm run dev
+npm test
+npm run build
+npm run lint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Vite proxies `/api` to the Services backend at `http://localhost:8080`. To use another backend, set `SERVICES_API_URL` when starting Vite. Production uses same-origin `/api` requests; serve `dist/` with the Services backend.
+
+## Data and actions
+
+- `GET /api/monitor` every 15 seconds: engine connectivity, incidents, recent events, notification configuration.
+- `GET /api/projects` every 30 seconds: grouped containers, health diagnostics, available image updates.
+- `POST /api/updates/check`: checks images, then refreshes groups. A 204 response is valid.
+- `POST /api/projects/{name}/update`: one confirmed group operation, with streamed NDJSON progress. Success requires an explicit `complete` event; errors, malformed events, or premature EOF are not success.
+
+Failed reads preserve the last snapshot and visibly mark it stale or disconnected. Unconfigured health checks are unverified, not healthy. Group reviews deduplicate services while showing all affected replica digests. Standalone containers and services without Compose labels cannot be updated from this UI; the backend additionally validates current Compose configuration.
+
+`npm test` runs behavior/API tests, React server-rendered markup checks, and the existing utility tests. Test fixtures only live in test files. Browser interaction and narrow-screen checks should accompany changes to the dashboard or native update dialog.

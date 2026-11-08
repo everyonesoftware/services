@@ -2,6 +2,7 @@ package updates
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type cachedResult struct {
 	digest    string
 	checkedAt time.Time
 	retryAt   time.Time
+	failed    bool
 }
 
 type Checker struct {
@@ -68,19 +70,40 @@ func (c *Checker) Apply(containers []groups.Container) {
 		container.UpdateAvailable = false
 		container.CurrentDigest = ""
 		container.ProposedDigest = ""
-		if container.Project == "" || container.State != "running" {
+		container.UpdateStatus = "unavailable"
+		container.UpdateError = ""
+		container.UpdateCheckedAt = ""
+		if container.Project == "" || container.State != "running" || container.MonitorStatus == "missing" {
 			continue
 		}
 		ref, err := parseReference(container.Image)
 		if err != nil {
+			container.UpdateStatus = "unsupported"
+			container.UpdateError = "Only public Docker Hub and GHCR tags can be checked; pinned digests do not move"
 			continue
 		}
 		container.CurrentDigest = localRepositoryDigest(ref, container.RepoDigests)
 		key := ref.key()
 		result, checked := c.results[key]
-		if checked && result.digest != "" && container.CurrentDigest != "" {
+		container.UpdateStatus = "checking"
+		if checked && !result.checkedAt.IsZero() {
+			container.UpdateCheckedAt = result.checkedAt.UTC().Format(time.RFC3339)
+		}
+		if container.CurrentDigest == "" {
+			container.UpdateStatus = "unknown"
+			container.UpdateError = "The running image has no matching repository digest"
+		}
+		if checked && result.failed {
+			container.UpdateStatus = "error"
+			container.UpdateError = "Registry check failed; authentication or registry availability may be required"
+		}
+		if checked && !result.failed && result.digest != "" && container.CurrentDigest != "" {
+			container.UpdateStatus = "current"
+		}
+		if checked && !result.failed && result.digest != "" && container.CurrentDigest != "" {
 			container.UpdateAvailable = container.CurrentDigest != result.digest
 			if container.UpdateAvailable {
+				container.UpdateStatus = "available"
 				container.ProposedDigest = result.digest
 			}
 		}
@@ -106,7 +129,7 @@ func (c *Checker) CheckNow(ctx context.Context, containers []groups.Container) e
 	seen := make(map[string]struct{})
 	var firstErr error
 	for _, container := range containers {
-		if container.Project == "" || container.State != "running" {
+		if container.Project == "" || container.State != "running" || container.MonitorStatus == "missing" {
 			continue
 		}
 		ref, err := parseReference(container.Image)
@@ -171,8 +194,13 @@ func (c *Checker) checkNow(ctx context.Context, image string) error {
 	c.mu.Lock()
 	result := c.results[ref.key()]
 	if err != nil || digest == "" {
+		result.failed = true
+		if err == nil {
+			err = fmt.Errorf("registry returned an empty digest")
+		}
 		result.retryAt = time.Now().Add(c.retryInterval)
 	} else {
+		result.failed = false
 		result.digest = digest
 		result.checkedAt = time.Now()
 		result.retryAt = time.Time{}

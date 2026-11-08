@@ -14,6 +14,18 @@ const (
 
 // Container is the Docker data needed for project health and image-update status.
 type Container struct {
+	UpdateStatus    string `json:"updateStatus,omitempty"`
+	UpdateError     string `json:"updateError,omitempty"`
+	UpdateCheckedAt string `json:"updateCheckedAt,omitempty"`
+	RestartCount    int    `json:"restartCount"`
+	StartedAt       string `json:"startedAt,omitempty"`
+	ExitCode        int    `json:"exitCode"`
+	OOMKilled       bool   `json:"oomKilled"`
+	HealthOutput    string `json:"healthOutput,omitempty"`
+	OneShot         bool   `json:"oneShot,omitempty"`
+	MonitorStatus   string `json:"monitorStatus,omitempty"`
+	MonitorReason   string `json:"monitorReason,omitempty"`
+
 	ID                      string   `json:"id"`
 	Name                    string   `json:"name"`
 	Project                 string   `json:"project"`
@@ -39,13 +51,17 @@ type Project struct {
 	UpdateAvailable bool        `json:"updateAvailable,omitempty"`
 }
 
-// Aggregate groups Compose-managed containers and derives one project status.
-// Unlabelled containers are intentionally excluded: Services is Compose-first.
+// Aggregate groups containers and derives one project status. Standalone containers have no Compose update metadata.
 func Aggregate(containers []Container) []Project {
 	byName := make(map[string][]Container)
 	for _, container := range containers {
 		if container.Project == "" {
-			continue
+			container.Project = "Standalone"
+			container.UpdateAvailable = false
+			container.ProposedDigest = ""
+			container.ComposeWorkingDir = ""
+			container.ComposeConfigFiles = nil
+			container.ComposeConfigFilesLabel = ""
 		}
 		byName[container.Project] = append(byName[container.Project], container)
 	}
@@ -74,6 +90,13 @@ func projectStatus(containers []Container) Status {
 	hasHealthCheck := false
 	starting := false
 	for _, container := range containers {
+		switch container.MonitorStatus {
+		case "restart-loop", "missing", "unhealthy", "stopped", "oom-killed":
+			return StatusUnhealthy
+		}
+		if container.OneShot && container.State == "exited" && container.ExitCode == 0 && !container.OOMKilled {
+			continue
+		}
 		if container.State != "running" {
 			if container.State == "created" {
 				starting = true

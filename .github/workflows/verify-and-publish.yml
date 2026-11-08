@@ -43,13 +43,9 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: Run frontend update metric tests
+      - name: Run frontend tests
         working-directory: web
-        run: npm run test:updates
-
-      - name: Run frontend image reference tests
-        working-directory: web
-        run: npm run test:image-reference
+        run: npm test
 
       - name: Build frontend
         working-directory: web

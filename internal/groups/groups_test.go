@@ -50,10 +50,10 @@ func TestAggregateMarksProjectStartingWhenHealthCheckIsStarting(t *testing.T) {
 	}
 }
 
-func TestAggregateKeepsUnlabelledContainersOutOfComposeGroups(t *testing.T) {
-	got := Aggregate([]Container{{ID: "raw", Name: "manual", State: "running"}})
-	if len(got) != 0 {
-		t.Fatalf("Aggregate() returned %d groups for an unlabelled container, want 0", len(got))
+func TestAggregateIncludesStandaloneWithoutUpdates(t *testing.T) {
+	got := Aggregate([]Container{{ID: "raw", Name: "manual", State: "running", UpdateAvailable: true, ComposeWorkingDir: "unsafe"}})
+	if len(got) != 1 || got[0].Name != "Standalone" || got[0].UpdateAvailable || got[0].Containers[0].UpdateAvailable || got[0].Containers[0].ComposeWorkingDir != "" {
+		t.Fatalf("unsafe standalone group: %+v", got)
 	}
 }
 

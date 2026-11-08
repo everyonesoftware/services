@@ -235,14 +235,18 @@ func TestComposeArgsResolvesACommaInsideAConfigFilename(t *testing.T) {
 func TestComposeArgsRejectsAmbiguousConfigFileLabels(t *testing.T) {
 	runner := &recordingRunner{}
 	updater, container, projectDir := testUpdater(t, runner)
-	ambiguousDirectory := filepath.Join(projectDir, "compose.yaml,E:", "Containers", "shop")
+	// Use Unix host labels so both possible parses have filesystem-valid
+	// mounted filenames even when this security test runs on Windows.
+	updater.hostRoot = "/Containers"
+	container.ComposeWorkingDir = "/Containers/shop"
+	ambiguousDirectory := filepath.Join(projectDir, "compose.yaml,", "Containers", "shop")
 	if err := os.MkdirAll(ambiguousDirectory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(ambiguousDirectory, "override.yaml"), []byte("services: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	container.ComposeConfigFilesLabel = `E:\Containers\shop\compose.yaml,E:\Containers\shop\override.yaml`
+	container.ComposeConfigFilesLabel = `/Containers/shop/compose.yaml,/Containers/shop/override.yaml`
 
 	if _, _, err := updater.composeArgs(container); err == nil {
 		t.Fatal("composeArgs() error = nil, want ambiguous config label rejected")

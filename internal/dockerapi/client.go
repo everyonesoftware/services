@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"services/internal/groups"
 )
@@ -55,17 +56,31 @@ type imageSummary struct {
 }
 
 type containerInspect struct {
-	State struct {
-		Status string `json:"Status"`
-		Health *struct {
+	RestartCount int `json:"RestartCount"`
+	State        struct {
+		StartedAt string `json:"StartedAt"`
+		ExitCode  int    `json:"ExitCode"`
+		OOMKilled bool   `json:"OOMKilled"`
+		Status    string `json:"Status"`
+		Health    *struct {
 			Status string `json:"Status"`
+			Log    []struct {
+				Output string `json:"Output"`
+			} `json:"Log"`
 		} `json:"Health"`
 	} `json:"State"`
 }
 
 func (c *Client) Containers() ([]groups.Container, error) {
+	return c.ContainersContext(context.Background())
+}
+
+// ContainersContext bounds a complete refresh, including all inspect requests.
+func (c *Client) ContainersContext(ctx context.Context) ([]groups.Container, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	var version engineVersion
-	if err := c.get("/version", &version); err != nil {
+	if err := c.get(ctx, "/version", &version); err != nil {
 		return nil, fmt.Errorf("read Docker Engine version: %w", err)
 	}
 	if version.APIVersion == "" {
@@ -73,19 +88,22 @@ func (c *Client) Containers() ([]groups.Container, error) {
 	}
 	prefix := "/v" + version.APIVersion
 	var summaries []containerSummary
-	if err := c.get(prefix+"/containers/json?all=1", &summaries); err != nil {
+	if err := c.get(ctx, prefix+"/containers/json?all=1", &summaries); err != nil {
 		return nil, fmt.Errorf("list Docker containers: %w", err)
 	}
 	var images []imageSummary
 	imageDigests := make(map[string][]string)
 	imageCreatedAt := make(map[string]int64)
-	if err := c.get(prefix+"/images/json?all=1&digests=1", &images); err == nil {
+	if err := c.get(ctx, prefix+"/images/json?all=1&digests=1", &images); err == nil {
 		for _, image := range images {
 			imageDigests[image.ID] = image.RepoDigests
 			imageCreatedAt[image.ID] = image.Created
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	containers := make([]groups.Container, 0, len(summaries))
 	for _, summary := range summaries {
 		state := summary.State
@@ -108,22 +126,30 @@ func (c *Client) Containers() ([]groups.Container, error) {
 		}
 		var inspect containerInspect
 		path := prefix + "/containers/" + url.PathEscape(summary.ID) + "/json"
-		if err := c.get(path, &inspect); err != nil {
+		if err := c.get(ctx, path, &inspect); err != nil {
 			return nil, fmt.Errorf("inspect container %s: %w", summary.ID, err)
 		}
+		container.RestartCount = inspect.RestartCount
+		container.StartedAt = inspect.State.StartedAt
+		container.ExitCode = inspect.State.ExitCode
+		container.OOMKilled = inspect.State.OOMKilled
+		container.OneShot = strings.EqualFold(summary.Labels["com.docker.compose.oneoff"], "true")
 		if inspect.State.Status != "" {
 			container.State = inspect.State.Status
 		}
 		if inspect.State.Health != nil {
 			container.Health = inspect.State.Health.Status
+			if logs := inspect.State.Health.Log; len(logs) > 0 {
+				container.HealthOutput = logs[len(logs)-1].Output
+			}
 		}
 		containers = append(containers, container)
 	}
 	return containers, nil
 }
 
-func (c *Client) get(path string, target any) error {
-	request, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+func (c *Client) get(ctx context.Context, path string, target any) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}

@@ -1,122 +1,99 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { checkForUpdates } from './api.ts'
+import { availableServices, connectionState, needsAttention, recentEvents, selectProjects } from './monitor.ts'
+import type { Filter, Monitor, Project } from './types.ts'
 import './App.css'
+import { ProjectGroup } from './ProjectGroup.tsx'
+import { UpdateDialog } from './UpdateDialog.tsx'
+export { ProjectGroup, UpdateDialog }
 
-function App() {
-  const [count, setCount] = useState(0)
+const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed'
+const timeLabel = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Not yet checked'
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+function usePolling<T>(url: string, interval: number) {
+  const [data, setData] = useState<T | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [revision, setRevision] = useState(0)
+  const refresh = useCallback(() => setRevision(value => value + 1), [])
+  useEffect(() => {
+    let active = true
+    let pending = false
+    let controller: AbortController | null = null
+    const poll = async () => {
+      if (pending) return
+      pending = true
+      controller = new AbortController()
+      const timeout = window.setTimeout(() => controller?.abort(), 12_000)
+      try {
+        const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+        if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
+        const next = await response.json() as T
+        if (active) { setData(next); setError('') }
+      } catch (cause) {
+        if (active) setError(cause instanceof DOMException && cause.name === 'AbortError' ? 'Request timed out' : errorMessage(cause))
+      } finally {
+        window.clearTimeout(timeout)
+        pending = false
+        if (active) setLoading(false)
+      }
+    }
+    void poll()
+    const timer = window.setInterval(poll, interval)
+    return () => { active = false; window.clearInterval(timer); controller?.abort() }
+  }, [url, interval, revision])
+  return { data, error, loading, refresh }
 }
 
-export default App
+export default function App() {
+  const projectsRequest = usePolling<{ projects: Project[] }>('/api/projects', 30_000)
+  const monitorRequest = usePolling<Monitor>('/api/monitor', 15_000)
+  const [now, setNow] = useState(() => Date.now())
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
+  const [checking, setChecking] = useState(false)
+  const [updateTarget, setUpdateTarget] = useState<Project | null>(null)
+  const checkLock = useRef(false)
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
+  const projects = projectsRequest.data?.projects ?? []
+  const monitor = monitorRequest.data
+  const error = monitorRequest.error || projectsRequest.error
+  const connection = connectionState(monitor, error, now)
+  const connected = connection === 'connected'
+  const attention = projects.filter(needsAttention).length
+  const updates = projects.reduce((total, project) => total + availableServices(project).length, 0)
+  const visible = selectProjects(projects, query, filter)
+  const incidents = monitor?.incidents ?? []
+  const events = monitor?.events ?? []
+  const refresh = () => { projectsRequest.refresh(); monitorRequest.refresh() }
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 5_000); return () => window.clearInterval(timer) }, [])
+
+  const check = async () => {
+    if (checkLock.current) return
+    checkLock.current = true
+    setChecking(true); setNotice(null)
+    try { await checkForUpdates(); setNotice({ text: 'Image check complete. Refreshing available updates…', error: false }); projectsRequest.refresh() }
+    catch (cause) { setNotice({ text: errorMessage(cause), error: true }) }
+    finally { checkLock.current = false; setChecking(false) }
+  }
+
+  const headline = !connected ? connection === 'connecting' ? 'Connecting to your engine' : 'Monitoring is interrupted' : projectsRequest.loading ? 'Reading service health' : attention || incidents.length ? 'Some services need attention' : projects.length ? 'No service problems detected' : 'Ready for your first service'
+
+  return <>
+    <a className="skip-link" href="#services">Skip to services</a>
+    <header className="app-header"><a className="brand" href="/" aria-label="Services home"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>services<span className="brand-divider" /> <span className="product-label">Engine monitor</span></a><span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span></header>
+    <main className="workspace">
+      <section className="page-heading"><div><div className="eyebrow">YOUR INFRASTRUCTURE, IN VIEW</div><h1>Monitor</h1><p>Service health, changes, and the things that need you.</p></div><div className="heading-actions"><button className="button secondary" onClick={refresh} type="button">↻ <span>Refresh</span></button><button className="button primary" onClick={() => void check()} disabled={checking || !connected} type="button">{checking ? 'Checking images…' : 'Check for updates'}</button></div></section>
+      {notice && <p role={notice.error ? 'alert' : 'status'} className={`notice ${notice.error ? 'danger' : ''}`}>{notice.text}</p>}
+      <section className={`health-banner ${!connected ? 'neutral' : attention || incidents.length ? 'warning' : 'good'}`} aria-label="Monitoring status"><span className="health-symbol" aria-hidden="true">{!connected ? '◌' : attention || incidents.length ? '!' : '✓'}</span><div className="health-copy"><h2>{headline}</h2><p>{!connected ? (error || monitor?.error || (connection === 'stale' ? 'The last health check is out of date. Previously observed data is shown below.' : 'Waiting for a fresh health check. No healthy state is assumed.')) : `${projects.length} groups · ${projects.reduce((count, project) => count + project.containers.length, 0)} containers observed${attention ? ` · ${attention} groups need attention` : ''}`}</p></div><div className="health-meta"><span>LAST HEALTH CHECK</span><time>{timeLabel(monitor?.lastChecked)}</time></div></section>
+      <div className="monitor-meta"><span><i className={`tiny-dot ${connected ? 'good' : ''}`} />Health polls every 15s <span className="meta-divider">/</span> Services every 30s</span><span>{monitor ? monitor.notificationConfigured ? 'Notifications configured' : 'Notifications not configured' : 'Checking notification status…'}</span></div>
+      {incidents.length > 0 && <section className="incidents" aria-labelledby="incident-heading"><div className="section-title"><h2 id="incident-heading">Needs attention <span className="count">{incidents.length}</span></h2><span className="section-note">{connected ? 'Active incidents' : 'Last observed incidents'}</span></div><div className="incident-list">{incidents.map(incident => <article className="incident" key={incident.id}><span className="incident-mark" aria-hidden="true">!</span><div><h3>{incident.project} <span>/</span> {incident.service || incident.name}</h3><p>{incident.reason || incident.status}</p></div><time title={incident.since}>Since {timeLabel(incident.since)}</time></article>)}</div></section>}
+      <section id="services" aria-labelledby="services-title"><div className="section-title services-title"><h2 id="services-title">Services <span className="count">{projectsRequest.data ? projects.length : '—'}</span></h2><span className="section-note">Problems first. Everything else, in order.</span></div><div className="toolbar"><div className="filters" aria-label="Filter service groups">{([['all', 'All', projects.length], ['attention', 'Needs attention', attention], ['updates', 'Updates', updates]] as const).map(([value, label, count]) => <button type="button" key={value} aria-pressed={filter === value} className={filter === value ? 'selected' : ''} onClick={() => setFilter(value)}>{label}<span>{projectsRequest.data ? count : '—'}</span></button>)}</div><label className="search"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.5"/><path d="m13 13 4 4" stroke="currentColor" strokeWidth="1.5"/></svg><span className="sr-only">Search services</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search services, images, reasons…" /></label></div>
+        {projectsRequest.loading ? <div className="empty-state" role="status"><span className="loading-mark" /> <h3>Loading services</h3><p>Discovering containers from your Docker Engine.</p></div> : !projectsRequest.data && projectsRequest.error ? <div className="empty-state"><h3>Services couldn’t be loaded</h3><p>{projectsRequest.error}</p><button className="button secondary" onClick={projectsRequest.refresh}>Try again</button></div> : visible.length === 0 ? <div className="empty-state"><span className="empty-mark" aria-hidden="true">⌕</span><h3>{projects.length ? 'No matching services' : 'No containers discovered'}</h3><p>{projects.length ? 'Try a different search or switch to All.' : 'Containers will appear here when your engine reports them.'}</p>{projects.length > 0 && <button className="button secondary" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</button>}</div> : <div className="project-list">{visible.map(project => <ProjectGroup key={project.name} project={project} onReview={setUpdateTarget} actionsDisabled={!connected || checking || updateTarget !== null} />)}</div>}
+      </section>
+      <section className="activity" aria-labelledby="activity-title"><div className="section-title"><h2 id="activity-title">Recent activity</h2><span className="section-note">{connected ? 'Latest engine observations' : 'Last observed events'}</span></div>{events.length === 0 ? <div className="activity-empty">{monitorRequest.loading ? 'Waiting for monitor events…' : monitorRequest.error ? 'Activity unavailable until monitoring reconnects.' : 'No events recorded yet. Changes will appear here.'}</div> : <ol className="event-list">{recentEvents(events).map(event => <li key={event.id}><span className={`event-dot ${event.kind}`} /><div><p><strong>{event.project || event.name || 'Engine'}</strong><span className="event-kind">{event.kind.replaceAll('_', ' ')}</span></p><p className="event-message">{event.message}</p>{event.name && event.project && <span className="event-name">{event.name}</span>}</div><time title={event.time}>{timeLabel(event.time)}</time></li>)}</ol>}</section>
+      <footer className="footer"><span>services <span className="footer-slash">/</span> A quieter view of your infrastructure.</span><span>Docker Engine · {connection === 'connected' ? 'Monitoring active' : 'Awaiting fresh data'}</span></footer>
+    </main>
+    {updateTarget && <UpdateDialog key={updateTarget.name} project={updateTarget} onClose={() => setUpdateTarget(null)} onUpdated={refresh} />}
+  </>
+}
