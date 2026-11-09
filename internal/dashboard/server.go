@@ -44,6 +44,7 @@ type originAuthority struct {
 }
 
 type Server struct {
+	publicationHandler   http.Handler
 	acknowledgeOperation func(context.Context, string) error
 	durable              *operations.Store
 	durableProduction    bool
@@ -106,6 +107,7 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 	s.mux.HandleFunc("GET /api/monitor", s.monitorInfo)
 	s.mux.HandleFunc("POST /api/projects/{name}/update", s.projectUpdate)
 	s.mux.HandleFunc("POST /api/updates/check", s.checkUpdates)
+	s.mux.HandleFunc("POST /api/images/published", s.imagePublished)
 	s.mux.HandleFunc("GET /api/version", s.versionInfo)
 	s.mux.HandleFunc("POST /api/containers/{id}/pull", s.pullContainer)
 	s.mux.HandleFunc("POST /api/containers/{id}/update", s.updateContainer)

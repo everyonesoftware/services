@@ -44,9 +44,65 @@ Choose **Review update** on a Compose group to see the changed services and dige
 
 This recreates containers and can cause downtime. It uses the Compose files and `.env` values on disk at execution time. Mutable tags may change between review and pull. No builds, dependency startup, volume removal, automatic updates, or automatic rollback are performed. Back up application data before updating. Compose operations are serialized to prevent overlapping updates. Closing a browser does not roll an update back.
 
+### Image publication notifications (optional)
+
+GitHub Actions can announce an image immediately after a successful GHCR push using `POST /api/images/published`. This is **metadata ingestion only**: accepting a publication does not pull images, enqueue updates, run Compose, or restart containers. Continue to use **Review update** and explicit confirmation to install updates.
+
+The notification supplies the published repository, actual tags, root manifest/index digest, version, source repository, commit, Git ref, workflow run and attempt, workflow URL, and UTC publication time. Services compares that digest with the running image's local repository digest for the exact repository **and tag**. A notification for `:main` does not change an application tracking `:latest`; pinned images remain pinned. Missing local repository digests remain unknown rather than implying an update. Notification ingestion and immediate dashboard display do not query GHCR. The existing background checks and **Check for updates** remain reconciliation paths, and a manually confirmed installation still checks/pulls from the registry.
+
+Configure `SERVICES_PUBLISH_TOKEN` with a high-entropy secret of at least 32 printable non-space ASCII characters (maximum 512), and `SERVICES_PUBLISH_REPOSITORIES` with a comma-separated list of exact untagged lowercase repositories, for example `ghcr.io/everyonesoftware/services`. Wildcards and tag suffixes are rejected. Both settings are required to enable the endpoint; neither is enabled by default. Store the same token in the publishing repository's GitHub Actions secret, never in committed files or workflow output. The credential authorizes notifications for its allowlist only; it does not grant dashboard or container-action permissions. This first implementation uses one notification credential per Services installation.
+
+Keep the endpoint behind Tailscale ACLs or an authenticated trusted private proxy. It requires an allowed request hostname (the configured public origin is automatically allowed), a bearer token, unencoded `application/json`, and at most 64 KiB. Browser `Origin` and `Sec-Fetch-Site` headers are rejected; existing browser-action origin protections remain unchanged. The Services environment requires `/data` on a verified writable persistent named volume or local bind. Configuration/storage failure disables notifications without disabling monitoring. Worker containers do not inherit the notification credential.
+
+Accepted publication metadata is committed to a separate `/data/publications.db` before acknowledgement, survives Services replacement, and is independent of the operation journal. Treat its SQLite database and any WAL/SHM files with the same stopped-copy or SQLite-aware backup precautions as the operation journal. HTTP 200 returns `{ "result": "accepted" }`, `duplicate`, or `stale`; only accepted newer metadata replaces the appropriate tag's known publication. Conflicting retained event identities return 409. Malformed metadata returns 400, invalid credentials 401, out-of-scope repositories or browser/untrusted-host requests 403, oversized bodies 413, unsupported media 415, and disabled/unavailable persistence 503. No acknowledgement claims an image has been installed.
+
+#### Enable the GitHub Actions sender
+
+The included workflow captures metadata immediately after `docker/build-push-action` succeeds, using its digest output and the actual Docker metadata tag list. It saves the original payload as an artifact for 30 days. A separate, opt-in job downloads that payload, joins the private tailnet, and sends it. The publish job remains successful if notification delivery fails; the notification job and its failure-report job make the delivery failure visible. **Re-run failed jobs**, not all jobs, to resend without rebuilding or republishing. Missing/expired artifacts fail closed rather than manufacturing a new publication timestamp.
+
+1. Deploy this version of Services with the persistent data mount and both `SERVICES_PUBLISH_*` environment settings above. Existing deployments must add those environment entries to their own Compose file; the supplied `compose.yaml` includes them. Keep the workflow notification variable disabled until the receiver is deployed.
+2. In Tailscale, create a dedicated CI tag and federated OIDC identity with **Auth Keys > Write** (`auth_keys`) and permission to use that tag. Restrict the identity's GitHub trust to the intended repository and publishing refs. For notification-only network access, expose a private proxy listener that forwards **only** `POST /api/images/published`, rejects every other method/path, and allow the CI tag only to that listener's port. Do not grant CI general access to the home server or dashboard port. Tailscale ACLs restrict network destinations/ports, not HTTP paths. See the official [Tailscale GitHub Action setup](https://tailscale.com/docs/integrations/github/github-action).
+3. Set these **GitHub repository variables**:
+
+   | Variable | Value |
+   | --- | --- |
+   | `SERVICES_PUBLISH_URL` | Full private HTTPS endpoint, e.g. `https://services.tail1a7c8f.ts.net/api/images/published`. No query, fragment, credentials, or alternate path. |
+   | `TAILSCALE_CLIENT_ID` | Federated OIDC identity client ID. |
+   | `TAILSCALE_AUDIENCE` | Federated identity audience. |
+   | `TAILSCALE_TAGS` | Authorized comma-separated CI tag(s), e.g. `tag:services-publisher`. |
+   | `SERVICES_PUBLISH_NOTIFICATIONS` | Set to the literal `true` only after the receiver and tailnet permissions are ready. |
+
+4. Set the **GitHub Actions secret** `SERVICES_PUBLISH_TOKEN` to the same notification-only secret configured on Services. Do not put the secret in repository variables.
+5. After the next successful publish, confirm the notification job reports an acknowledged result. A matching running application's update status appears on the next dashboard services poll (normally within 30 seconds); open **Review update** to see publication version/time, commit, and workflow links. Installation still needs confirmation.
+
+**Network trust matters:** Services' existing dashboard action routes do not have built-in login authentication. Their Origin/Host checks are browser-CSRF defenses, not authorization against a server-side client that can supply its own headers. The notification token does not grant those routes access, but direct CI access to the dashboard listener would still trust that runner as a dashboard network client. A notification-only proxy listener and destination-port ACL are required if the runner must not have that pre-existing dashboard capability. Add the proxy's forwarded hostname to `SERVICES_ALLOWED_HOSTS` as necessary, and use its HTTPS URL (including a dedicated port if used) for `SERVICES_PUBLISH_URL`.
+
+The sender is dependency-free Node 24: `node scripts/publish-notification.mjs capture` creates the artifact once; `node scripts/publish-notification.mjs send` sends the file at `SERVICES_PUBLISH_PAYLOAD_PATH`. Capture uses `PUBLISHED_DIGEST`, newline-separated fully qualified `PUBLISHED_TAGS`, the positive integer `APP_VERSION`, and GitHub's repository/SHA/ref/run/attempt environment. The image name may differ from the source repository name. The send command requires `SERVICES_PUBLISH_URL` and `SERVICES_PUBLISH_TOKEN`. It serializes once and makes at most four attempts, with a ten-second timeout per request and exponential delays. It retries transient network failures and HTTP 408/429/5xx, does not follow redirects, and never logs credentials or untrusted response bodies.
+
+To enable another application, add its exact image repository to Services' allowlist and add the same capture/artifact/notification lifecycle to that application's publish workflow. Supply that workflow's actual tags, root digest, and version; do not infer them from a current GHCR lookup or assume the image name equals the GitHub repository. Only the Services repository's workflow is wired here; other repositories are not modified.
+
+The workflow serializes non-PR publish-and-notify runs in a shared concurrency group, with no cancellation of running work and up to 100 queued runs (`queue: max`). Overflow runs are canceled; ordering is by entry into the concurrency queue, not guaranteed commit or dispatch order. PRs use separate groups. Other publishers must use equivalent serialization for shared mutable tags. Background/manual checks remain necessary reconciliation for external tag changes, missed delivery, clock skew, or unavailable Services. See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+
+#### Notification contract and retention
+
+Schema version 1 accepts these JSON fields (unknown fields are rejected):
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | Integer `1`. |
+| `repository`, `tags`, `digest` | Untagged lowercase GHCR image repository, 1–64 distinct bare tags, and published root manifest/index `sha256:<64 lowercase hex>` digest. |
+| `version` | Optional bounded human-readable version string; the included sender uses the commit-count build number. |
+| `sourceRepository`, `commit`, `ref` | GitHub `owner/repository`, full lowercase commit SHA, and full Git ref. |
+| `runId`, `runAttempt`, `runUrl` | Positive decimal run ID **as a string**, positive integer attempt, and exact `https://github.com/<sourceRepository>/actions/runs/<runId>`. |
+| `publishedAt` | RFC3339 UTC publication timestamp ending in `Z`, captured after successful push, not when delivery is retried. |
+
+Repositories bind to their first accepted source repository. Duplicate retained event identities (source, image repository, run ID, attempt) must have identical metadata; conflicting payloads are rejected. Publication time determines freshness; run/attempt is only an equal-time tie-breaker. Notifications more than five minutes in the future are rejected. Coordinators sharing the data directory observe committed metadata and fence registry requests that started before a notification.
+
+The cache supports 128 source-bound repositories, retains at most 256 recently updated tag mappings per repository, and retains 1,024 recent event identities plus older events still referenced by retained tags. Older tag mappings are evicted so unique version/SHA tags do not exhaust a lifetime quota; an evicted tag falls back to ordinary registry checking. A compact replay floor prevents pruned identities from being reused to replace newer data. Rerunning a sufficiently old workflow below that floor is treated as stale; trigger a new workflow run instead. This is bounded update-discovery provenance, not a complete release audit log. A later registry reconciliation that finds a different digest clears mismatched publication details rather than attributing that image to the old notification.
+
 ### Restart-resilient execution and self-update
 
-The supplied deployment stores operations in SQLite under `/data`, backed by the `services-data` named volume by default. A writable local host-folder bind at `/data` is also supported. Accepted work, submission order, recent output, and results survive replacement of the Services container. This does **not** persist monitoring incidents, registry-check caches, or webhook delivery history.
+The supplied deployment stores operations in SQLite under `/data`, backed by the `services-data` named volume by default. A writable local host-folder bind at `/data` is also supported. Accepted work, submission order, recent output, and results survive replacement of the Services container. This does **not** persist monitoring incidents or webhook delivery history. General registry-check caches remain in memory; the separate publication database preserves registry reconciliations for retained announced tags so a restart cannot resurrect superseded publication metadata.
 
 Coordinators sharing this storage serialize the entire helper reconciliation and launch interval using a separate SQLite reservation file, `operations.db.coordinator-lock`, alongside the journal. A process crash releases the reservation automatically. Keep all files in the data directory together; do not remove or replace the coordination file while any Services coordinator is running.
 
@@ -147,6 +203,8 @@ Configure these environment variables (for example in a local `.env` file):
 | `SERVICES_ALLOWED_HOSTS` | Additional exact hostnames allowed to perform actions, comma separated. Add your LAN hostname/IP if needed. |
 | `SERVICES_PUBLIC_ORIGIN` | Exact browser origin when using a TLS-terminating proxy, e.g. `https://services.example.net` (no trailing slash). |
 | `SERVICES_WEBHOOK_URL` | Optional generic JSON notification receiver. |
+| `SERVICES_PUBLISH_TOKEN` | Optional notification-only bearer secret, 32–512 printable non-space ASCII characters. Requires an explicit repository allowlist. |
+| `SERVICES_PUBLISH_REPOSITORIES` | Exact untagged GHCR repositories allowed to submit publication metadata, comma separated. No wildcards. |
 | `SERVICES_PROJECT_NAME` | Services' own Compose project name; defaults to `services`. |
 | `SERVICES_DATA_DIR` | Must be `/data` backed by a writable named volume or local host-folder bind. Named volumes use the image directory's initial ownership; a host folder needs compatible permissions of its own. |
 | `SERVICES_SERVICE_NAME` | Optional Services Compose service identity; defaults to `services`. Configure custom deployments explicitly. |
@@ -169,6 +227,7 @@ The application-project bind is read-only, but Services must read trusted Compos
 Requires Go 1.24+ and Node.js with npm.
 
 ```sh
+node --test scripts/*.test.mjs
 cd web
 npm ci
 npm test
@@ -178,6 +237,8 @@ go test ./...
 go vet ./...
 go build ./cmd/services
 ```
+
+Notification tests use local HTTP/registry fixtures and temporary SQLite databases, not a live GHCR publish or an application update. The workflow uses GitHub's documented `concurrency.queue: max`; actionlint 1.7.12 does not yet recognize that property. If using that linter version, suppress only its specific `unexpected key "queue" for "concurrency" section` diagnostic, not other syntax or expression checks.
 
 The Go server serves `web/dist`. Run `go run ./cmd/services` after building the frontend. Native Windows development can exercise API and UI behavior, but the production Docker connector uses a Unix socket inside the Linux container.
 

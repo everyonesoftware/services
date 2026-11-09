@@ -12,19 +12,37 @@ const (
 	StatusUnhealthy Status = "unhealthy"
 )
 
+// ImagePublication records untrusted, validated image-publication provenance.
+// It describes a registry root manifest/index digest, not deployment authority.
+type ImagePublication struct {
+	SchemaVersion    int      `json:"schemaVersion"`
+	Repository       string   `json:"repository"`
+	Tags             []string `json:"tags"`
+	Digest           string   `json:"digest"`
+	Version          string   `json:"version,omitempty"`
+	SourceRepository string   `json:"sourceRepository"`
+	Commit           string   `json:"commit"`
+	Ref              string   `json:"ref"`
+	RunID            string   `json:"runId"`
+	RunAttempt       int      `json:"runAttempt"`
+	RunURL           string   `json:"runUrl"`
+	PublishedAt      string   `json:"publishedAt"`
+}
+
 // Container is the Docker data needed for project health and image-update status.
 type Container struct {
-	UpdateStatus    string `json:"updateStatus,omitempty"`
-	UpdateError     string `json:"updateError,omitempty"`
-	UpdateCheckedAt string `json:"updateCheckedAt,omitempty"`
-	RestartCount    int    `json:"restartCount"`
-	StartedAt       string `json:"startedAt,omitempty"`
-	ExitCode        int    `json:"exitCode"`
-	OOMKilled       bool   `json:"oomKilled"`
-	HealthOutput    string `json:"healthOutput,omitempty"`
-	OneShot         bool   `json:"oneShot,omitempty"`
-	MonitorStatus   string `json:"monitorStatus,omitempty"`
-	MonitorReason   string `json:"monitorReason,omitempty"`
+	UpdatePublication *ImagePublication `json:"updatePublication,omitempty"`
+	UpdateStatus      string            `json:"updateStatus,omitempty"`
+	UpdateError       string            `json:"updateError,omitempty"`
+	UpdateCheckedAt   string            `json:"updateCheckedAt,omitempty"`
+	RestartCount      int               `json:"restartCount"`
+	StartedAt         string            `json:"startedAt,omitempty"`
+	ExitCode          int               `json:"exitCode"`
+	OOMKilled         bool              `json:"oomKilled"`
+	HealthOutput      string            `json:"healthOutput,omitempty"`
+	OneShot           bool              `json:"oneShot,omitempty"`
+	MonitorStatus     string            `json:"monitorStatus,omitempty"`
+	MonitorReason     string            `json:"monitorReason,omitempty"`
 
 	ID                      string   `json:"id"`
 	Name                    string   `json:"name"`
@@ -55,7 +73,13 @@ type Project struct {
 func Aggregate(containers []Container) []Project {
 	byName := make(map[string][]Container)
 	for _, container := range containers {
+		if container.UpdatePublication != nil {
+			p := *container.UpdatePublication
+			p.Tags = append([]string(nil), p.Tags...)
+			container.UpdatePublication = &p
+		}
 		if container.Project == "" {
+			container.UpdatePublication = nil
 			container.Project = "Standalone"
 			container.UpdateAvailable = false
 			container.ProposedDigest = ""

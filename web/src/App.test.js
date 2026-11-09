@@ -41,6 +41,100 @@ test('update review names exact services and digests with downtime warning, nati
   assert.doesNotMatch(html, /updated successfully/)
 })
 
+const publication = {
+  schemaVersion: 1, repository: 'ghcr.io/acme/site', tags: ['latest', 'v2.1'], digest: 'sha256:new',
+  version: 'v2.1', sourceRepository: 'acme/site', commit: 'a'.repeat(40), ref: 'refs/heads/main',
+  runId: '12345', runAttempt: 1, runUrl: 'https://github.com/acme/site/actions/runs/12345',
+  publishedAt: '2026-11-09T12:34:56Z',
+}
+const publicationProject = (value) => ({ ...fixture, containers: [{ ...fixture.containers[0], updatePublication: value }] })
+const reviewMarkup = (project) => renderToStaticMarkup(createElement(components.UpdateDialog, { project, onClose() {}, onUpdated() {} }))
+
+test('manual update review renders publication provenance, version, publication time and safe GitHub links', () => {
+  const html = reviewMarkup(publicationProject(publication))
+  assert.match(html, /Publish notification/)
+  assert.match(html, /Available version/)
+  assert.match(html, />v2\.1</)
+  assert.match(html, /Published/)
+  assert.match(html, /<time dateTime="2026-11-09T12:34:56Z">/)
+  assert.ok(html.includes(new Date(publication.publishedAt).toLocaleString()))
+  assert.match(html, /href="https:\/\/github.com\/acme\/site\/commit\/a{40}"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/)
+  assert.match(html, /href="https:\/\/github.com\/acme\/site\/actions\/runs\/12345"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/)
+  assert.match(html, /Workflow run/)
+  assert.match(html, /Confirm &amp; update/)
+  assert.match(html, />Cancel</)
+})
+
+test('publication links reject untrusted GitHub URLs and escape injected display text', () => {
+  for (const runUrl of [
+    'javascript:alert(1)', 'https://github.com.evil.test/acme/site/actions/runs/12345',
+    'https://github.com@evil.test/acme/site/actions/runs/12345',
+    'https://github.com/acme/other/actions/runs/12345', 'https://github.com/acme/site/actions/runs/999',
+    'https://github.com/acme/site/actions/runs/12345?next=evil',
+    'https://github.com/acme/site/actions/runs/12345#evil',
+    'http://github.com/acme/site/actions/runs/12345',
+    'https://github.com:443/acme/site/actions/runs/12345',
+  ]) {
+    const html = reviewMarkup(publicationProject({ ...publication, runUrl, version: '<img src=x onerror=alert(1)>' }))
+    assert.doesNotMatch(html, /<a[^>]*>Workflow run/)
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)
+    assert.doesNotMatch(html, /<img|onerror="/)
+  }
+  for (const sourceRepository of ['acme/../evil', 'evil.test/path/more', 'acme/site?x', 'acme/%2e%2e', 'acme/..', 'acme\\site', 'acme/site\n']) {
+    assert.doesNotMatch(reviewMarkup(publicationProject({ ...publication, sourceRepository })), /<a /)
+  }
+  assert.doesNotMatch(reviewMarkup(publicationProject({ ...publication, commit: 'not-a-sha<script>' })), /<a[^>]*\/commit\//)
+})
+
+test('missing, partial and unsupported publication data keep manual digest review usable', () => {
+  for (const value of [undefined, null, {}, { schemaVersion: 99 }, { ...publication, schemaVersion: 2 }, 'unexpected']) {
+    const html = reviewMarkup(publicationProject(value))
+    assert.doesNotMatch(html, /Publish notification|Invalid Date|href=/)
+    assert.match(html, /sha256:new/)
+    assert.match(html, /Confirm &amp; update/)
+  }
+  const partial = reviewMarkup(publicationProject({ schemaVersion: 1, publishedAt: 'invalid', version: { invalid: true } }))
+  assert.match(partial, /Publish notification/)
+  assert.match(partial, /Not reported/)
+  assert.doesNotMatch(partial, /Invalid Date|href=|Available version/)
+  const noVersion = reviewMarkup(publicationProject({ ...publication, version: undefined }))
+  assert.doesNotMatch(noVersion, /Available version/)
+  assert.match(noVersion, /Workflow run/)
+})
+
+test('replicas share one publication detail without leaking another service or stale metadata', () => {
+  const first = publicationProject(publication).containers[0]
+  const project = { ...fixture, containers: [first, { ...first, id: 'replica' }, { ...first, id: 'db', service: 'db', updateAvailable: false, updatePublication: { ...publication, version: 'stale-db-version' } }] }
+  const html = reviewMarkup(project)
+  assert.equal((html.match(/Publish notification/g) || []).length, 1)
+  assert.doesNotMatch(html, /stale-db-version/)
+  assert.match(html, /2 replicas/)
+})
+
+test('publication details stay in expanded container inspection and leave manual actions unchanged', () => {
+  const requests = []
+  let reviewed = 0
+  let updated = 0
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (...args) => { requests.push(args); throw new Error('Rendering must not submit an update') }
+  try {
+    const project = publicationProject(publication)
+    const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() { reviewed++ }, actionsDisabled: false }))
+    const summary = html.match(/<summary class="container-summary">([\s\S]*?)<\/summary>/)[1]
+    assert.doesNotMatch(summary, /Publish notification|v2\.1|Workflow run/)
+    assert.match(html, /Publish notification/)
+    assert.match(html, /Review 1 update/)
+    const dialog = renderToStaticMarkup(createElement(components.UpdateDialog, { project, onClose() {}, onUpdated() { updated++ } }))
+    assert.deepEqual([...dialog.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map(match => match[1]), ['Cancel', 'Confirm &amp; update'])
+    assert.equal(reviewed, 0)
+    assert.equal(updated, 0)
+    assert.deepEqual(requests, [])
+    assert.doesNotMatch(html + dialog, /auto.?update|automatically (update|install)|registry check/i)
+    const fallback = renderToStaticMarkup(createElement(components.ProjectGroup, { project: fixture, onReview() {}, actionsDisabled: false }))
+    assert.doesNotMatch(fallback, /Publish notification/)
+  } finally { globalThis.fetch = originalFetch }
+})
+
 test('busy engine review offers queuing and explains fresh execution-time validation', () => {
   const html = renderToStaticMarkup(createElement(components.UpdateDialog, { project: fixture, onClose: () => {}, onUpdated: () => {}, engineBusy: true }))
   assert.match(html, /Confirm &amp; queue/)

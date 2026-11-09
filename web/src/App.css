@@ -149,6 +149,13 @@ h1 { font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -1.2p
 .review-service-title h3 { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .review-service-title > span { font-size: 10px; color: #7c886b; white-space: nowrap; }
 .review-image { display: block; color: #7a876a; font-size: 10px; margin-top: 5px; overflow-wrap: anywhere; }
+.publication-details { margin-top: 12px; min-width: 0; }
+.publication-details > .image-check-note { margin: 0 0 7px; }
+.publication-facts { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 0; }
+.publication-facts > div { min-width: 0; max-width: 100%; }
+.publication-facts dt { color: var(--muted); font-size: 10px; margin-bottom: 4px; }
+.publication-facts dd { margin: 0; font-size: 11px; overflow-wrap: anywhere; }
+.publication-facts a { color: var(--teal); text-underline-offset: 3px; }
 .digest-comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 15px; margin-top: 14px; border-top: 1px solid #e0e6d5; }
 .digest-comparison > div { min-width: 0; }
 .digest-comparison span { display: block; font-size: 9px; letter-spacing: .9px; color: #869273; margin-bottom: 7px; }

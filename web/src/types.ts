@@ -1,3 +1,18 @@
+export type ImagePublication = {
+  schemaVersion: number
+  repository: string
+  tags: string[]
+  digest: string
+  version?: string
+  sourceRepository: string
+  commit: string
+  ref: string
+  runId: string
+  runAttempt: number
+  runUrl: string
+  publishedAt: string
+}
+
 export type Container = {
   id: string
   name: string
@@ -19,6 +34,7 @@ export type Container = {
   updateStatus?: string
   updateError?: string
   updateCheckedAt?: string
+  updatePublication?: ImagePublication
 }
 export type Project = { name: string; status: string; updateAvailable?: boolean; containers: Container[] }
 export type Incident = { id: string; project: string; service: string; name: string; status: string; reason: string; since: string }

@@ -60,6 +60,15 @@ func main() {
 		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
 	}
 	handler.SetActionSource(source)
+	publications, err := configurePublications(handler, checker)
+	if err != nil {
+		log.Printf("Publication notifications disabled: %v", err)
+	} else if publications != nil {
+		defer func() {
+			stop()
+			_ = publications.Close()
+		}()
+	}
 	configureOperations(ctx, handler, socket)
 	go checker.Run(ctx, source)
 	server := &http.Server{
