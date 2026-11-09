@@ -70,6 +70,11 @@ h1 { font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -1.2p
 .project-group[open] > .group-summary > .disclosure, .container-detail[open] > .container-summary .disclosure { transform: rotate(90deg); }
 .group-identity { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .group-identity strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.identity-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.identity-name > span { min-width: 0; overflow-wrap: anywhere; }
+.service-icon { width: 20px; height: 20px; flex: none; padding: 2px; box-sizing: border-box; }
+.group-identity .service-icon { width: 22px; height: 22px; }
+.neutral-icon { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
 .group-identity > span { font-size: 10px; color: var(--muted); }
 .group-identity b { font-weight: 400; color: #b5b7ac; padding: 0 4px; }
 .group-signals { display: flex; align-items: center; gap: 15px; flex-shrink: 0; }

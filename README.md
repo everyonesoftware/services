@@ -14,6 +14,14 @@ Monitoring runs on the server, not in a browser tab. The dashboard shows active 
 - Docker outages are shown separately from application failures. The last successful inventory stays visible and is marked stale; it is not presented as a live healthy result.
 - Active incidents and recent history are in memory. They reset when Services restarts. Polling is not an exhaustive Docker event log: containers created and removed entirely between polls may not be observed.
 
+### Service icons
+
+Project and container names have small, locally bundled SVG icons. Recognized applications use the existing Simple Icons brand artwork and colors; each icon's upstream source and any brand guidelines are recorded in that dependency's metadata. No external image requests or runtime logo-search service are used.
+
+The curated mapping in `web/src/brandIcons.js` matches image repository basenames and explicit aliases, ignoring registry hosts, namespaces, tags, and digests. It does not guess from container names or treat a brand string anywhere in an image reference as a match. Custom images and applications outside the mapping receive a neutral container icon rather than an invented logo.
+
+A Compose project uses its single recognized application brand, ignoring Tailscale sidecars. Tailscale-only projects use Tailscale; mixed application brands, unknown applications with only a recognized VPN sidecar, and the Standalone group use a neutral stack icon. Container rows always keep their individual image's icon, and health indicators remain separate.
+
 ### Notifications
 
 Set `SERVICES_WEBHOOK_URL` to an HTTP(S) endpoint that accepts a JSON POST to receive problem and recovery events even when the dashboard is closed. An event has `id`, `project`, `name`, `kind`, `message`, and `time` fields. This is a generic webhook, not a Discord/Slack-specific payload; use a compatible receiver or an automation bridge.

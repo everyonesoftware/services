@@ -115,9 +115,24 @@ test('healthy rows avoid redundant health prose and duplicate container names', 
   const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { name: 'site', containers: [container] }, onReview: () => {}, actionsDisabled: false }))
   const summary = html.match(/<summary class="container-summary">([\s\S]*?)<\/summary>/)[1]
   assert.doesNotMatch(summary, /Health check passing/)
-  assert.doesNotMatch(summary, /<span>web<\/span>/)
+  assert.equal((summary.match(/>web</g) || []).length, 1)
   assert.match(summary, /nginx:stable/)
   assert.match(summary, /Healthy/)
+})
+
+test('project and container names have local decorative brand icons and unknowns have neutral icons', () => {
+  const container = { ...fixture.containers[0], image: 'tailscale/tailscale:stable', service: 'vpn' }
+  const render = (image) => renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, name: 'my-vpn', containers: [{ ...container, image }] }, onReview() {}, actionsDisabled: false }))
+  const html = render(container.image)
+  assert.equal((html.match(/data-brand="tailscale"/g) || []).length, 2)
+  for (const name of ['my-vpn', 'vpn']) {
+    assert.match(html, new RegExp(`class="identity-name"><svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?</svg><span>${name}</span>`))
+  }
+  assert.doesNotMatch(html, /<img|https?:\/\//)
+  const unknown = render('custom/unknown:latest')
+  assert.match(unknown, /data-brand="stack"/)
+  assert.match(unknown, /data-brand="container"/)
+  assert.match(unknown, /site-web-1/)
 })
 
 test('monitor starts honestly connecting, with accessible search and filters, not a connected claim or fabricated counts', () => {
