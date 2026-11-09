@@ -27,7 +27,7 @@ func TestHelperUsesExactImageMountsAndNoInheritedSecrets(t *testing.T) {
 	}))
 	defer server.Close()
 	e := NewEngine(server.URL, server.Client())
-	c := WorkerConfig{Image: "sha256:exact", User: "10001:10001", DataDir: "/data", Volume: "services-data", HostRoot: "C:/Code", MountRoot: "/projects", Socket: "/var/run/docker.sock", SocketSource: "/var/run/docker.sock", ProjectSource: "C:/Code", Project: "services", Service: "services"}
+	c := WorkerConfig{Image: "sha256:exact", User: "10001:10001", DataDir: "/data", Storage: StorageMount{Type: "volume", Source: "services-data"}, HostRoot: "C:/Code", MountRoot: "/projects", Socket: "/var/run/docker.sock", SocketSource: "/var/run/docker.sock", ProjectSource: "C:/Code", Project: "services", Service: "services"}
 	if err := e.Launch(context.Background(), c, Operation{ID: "compose-123", Worker: "services-worker-123"}); err != nil {
 		t.Fatal(err)
 	}

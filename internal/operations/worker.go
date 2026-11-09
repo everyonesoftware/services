@@ -29,6 +29,7 @@ type Executor struct {
 	Checker          Checker
 	Updater          VerifiedUpdater
 	Engine           *Engine
+	Storage          StorageMount
 	Project, Service string
 }
 
@@ -142,7 +143,7 @@ func (w *Executor) Execute(parent context.Context, id string) (result error) {
 	err = w.Updater.UpdateProjectVerified(ctx, members, func(reference string) (string, error) {
 		for _, member := range members {
 			if self && member.Service == w.Service && member.UpdateAvailable && member.Image == reference {
-				if err := w.Engine.ValidateWorkerImage(ctx, reference); err != nil {
+				if err := w.Engine.validateWorkerImage(ctx, reference, w.Storage.Type == "bind"); err != nil {
 					return "", err
 				}
 			}

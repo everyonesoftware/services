@@ -37,11 +37,11 @@ This recreates containers and can cause downtime. It uses the Compose files and 
 
 ### Restart-resilient execution and self-update
 
-The supplied deployment stores operations in SQLite under `/data`, backed by the `services-data` named volume. Accepted work, submission order, recent output, and results survive replacement of the Services container. This does **not** persist monitoring incidents, registry-check caches, or webhook delivery history.
+The supplied deployment stores operations in SQLite under `/data`, backed by the `services-data` named volume by default. A writable local host-folder bind at `/data` is also supported. Accepted work, submission order, recent output, and results survive replacement of the Services container. This does **not** persist monitoring incidents, registry-check caches, or webhook delivery history.
 
-Coordinators sharing this volume serialize the entire helper reconciliation and launch interval using a separate SQLite reservation file, `operations.db.coordinator-lock`, alongside the journal. A process crash releases the reservation automatically. Keep all files in the data volume together; do not remove the coordination file while any Services coordinator is running.
+Coordinators sharing this storage serialize the entire helper reconciliation and launch interval using a separate SQLite reservation file, `operations.db.coordinator-lock`, alongside the journal. A process crash releases the reservation automatically. Keep all files in the data directory together; do not remove or replace the coordination file while any Services coordinator is running.
 
-Compose updates execute in temporary worker containers, independently of the dashboard process. Each worker uses the exact installed Services image, the Docker socket, the same read-only project mount, and the operation-data volume. Workers have no published ports and do not inherit the dashboard's webhook configuration. Their identity and progress are tied to one durable operation, not to a browser connection.
+Compose updates execute in temporary worker containers, independently of the dashboard process. Each worker uses the exact installed Services image, the Docker socket, the same read-only project mount, and the same writable operation storage. For a named volume, the worker reuses its actual Docker name; for a host-folder bind, it reuses the exact source path reported by Docker inspection, not a relative `./data` or the container's `/data` path. Workers have no published ports and do not inherit the dashboard's webhook configuration. Their identity and progress are tied to one durable operation, not to a browser connection.
 
 Set `SERVICES_PROJECT_NAME` if Services' own Compose project is not named `services`. Self-updates use the same worker handoff: validate and pull before replacing the dashboard, reject an image without the compatible `io.services.worker.protocol=1` label before applying, then verify the replacement image and application readiness before reporting completion. The dashboard reconnects automatically after the interruption; a lost connection is not evidence of success or failure. The `/api/ready` endpoint is used by the supplied image's Docker health check. Worker readiness probes currently require the internal HTTP port to remain **8080**; the externally published port may be changed.
 
@@ -50,6 +50,45 @@ On startup, Services reconciles saved work with its Docker workers before starti
 If a helper disappears or exits without a durable result, or application/verification fails after applying begins, the operation is marked **Interrupted** and the queue pauses. Check the affected project in Docker, review the recorded output and expected image IDs, and resolve any application problem before choosing **Acknowledge interruption**. The server checks that the operation's worker is absent or stopped before releasing this gate. Acknowledgement preserves the failed/uncertain result and does **not** retry the operation, mark it successful, or perform rollback; it permits other queued work to resume.
 
 **Initial installation:** installing this feature still requires an external Compose update, including the updated volume configuration. Subsequent self-updates require compatible durable-operation and worker protocols. Keep the data volume when replacing or updating Services: **do not use `docker compose down -v`** unless you deliberately want to delete the operation database. Back up the data volume when Services and its workers are stopped, or use a SQLite-aware online backup procedure; copying only the live database file is not a reliable backup.
+
+### Optional host-folder storage
+
+Named volumes remain the default; they are not required. To use a host folder, create `data` beside your Compose file and replace the `services-data:/data` mount with `./data:/data`. Keep `SERVICES_DATA_DIR=/data` and the existing project-root and Docker-socket mounts. The included permanent override uses the explicit form and refuses to create a missing host folder automatically:
+
+```yaml
+services:
+  services:
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+        read_only: false
+        bind:
+          create_host_path: false
+```
+
+For the supplied deployment, apply it with `docker compose -f compose.yaml -f compose.bind.yaml up --build -d`. If your existing main file is `docker-compose.yml`, use that filename instead. Keep both Compose files permanently in the mounted application directory: Compose records their paths for subsequent updates. You may instead edit the main file directly and omit the override. An unused top-level named-volume declaration does not migrate or delete any existing data.
+
+The host folder must already exist and be writable by the non-root container user. On Linux, check that user's UID/GID (for example with `docker exec services id`) and set the directory ownership appropriately; do not solve this by making the worker privileged or running it as root. Docker Desktop on Windows also requires access to the shared drive/folder. A bind mount hides the image's preconfigured `/data` directory and its ownership. SQLite and the coordination reservation require reliable local filesystem locking; do not place this directory on SMB/NFS/NAS or use it from Docker Engines on different machines. Read-only, temporary, ambiguous, and nested mounts beneath `/data` are rejected.
+
+Bind-backed self-updates additionally require the target image's `io.services.storage.bind=1` capability label. An older image without host-folder support is rejected before replacement; named-volume deployments retain the existing worker-protocol compatibility rules. Installing host-folder support on an older deployment requires an external update before enabling the bind mount.
+
+#### Moving an existing queue to a host folder
+
+There is no automatic storage migration and no database-schema change. Do **not** change mounts during an in-app update: the running helper would still write to the previous storage.
+
+1. Let accepted work finish, resolve any uncertain outcome, and confirm no Services worker containers are running. Stop every Services coordinator that shares the old storage; keep them stopped throughout the copy.
+2. Back up the old storage. Find its actual volume name with `docker inspect services --format '{{json .Mounts}}'`; do not assume it equals the short Compose name.
+3. Copy the **entire stopped `/data` directory**, including hidden files, `operations.db`, any `operations.db-wal`/`operations.db-shm` files, and `operations.db.coordinator-lock`, into an empty host folder. Preserve writable permissions for the Services user. For example, using the new locally built image and explicit replacement paths:
+
+   ```sh
+   docker run --rm --entrypoint sh --mount type=volume,source=ACTUAL_OLD_VOLUME,target=/old,readonly --mount type=bind,source=ABSOLUTE_EXISTING_HOST_DATA_FOLDER,target=/new services:host-storage -c 'cp -R /old/. /new/'
+   ```
+
+   `services:host-storage` is an example local tag; substitute your new compatible image. Replace both uppercase placeholders before running. Do not copy a live database or merge independent queues.
+
+4. Apply the new image and storage configuration externally, retaining the same Compose project identity. Start Services, check `/api/ready` for `ready: true` and `mutationsEnabled: true`, and confirm the saved operation IDs and history are present.
+5. Keep the old volume as a backup until the migration is verified. Do not run coordinators against both old and new copies: they are independent queues and no longer share the same lock.
 
 ### Deployments with a networking sidecar
 
@@ -94,7 +133,7 @@ Configure these environment variables (for example in a local `.env` file):
 | `SERVICES_PUBLIC_ORIGIN` | Exact browser origin when using a TLS-terminating proxy, e.g. `https://services.example.net` (no trailing slash). |
 | `SERVICES_WEBHOOK_URL` | Optional generic JSON notification receiver. |
 | `SERVICES_PROJECT_NAME` | Services' own Compose project name; defaults to `services`. |
-| `SERVICES_DATA_DIR` | Must be `/data` backed by a writable named volume for durable workers. The supplied image initializes this directory for its non-root user. |
+| `SERVICES_DATA_DIR` | Must be `/data` backed by a writable named volume or local host-folder bind. Named volumes use the image directory's initial ownership; a host folder needs compatible permissions of its own. |
 | `SERVICES_SERVICE_NAME` | Optional Services Compose service identity; defaults to `services`. Configure custom deployments explicitly. |
 | `SERVICES_CONTAINER_NAME` | Optional container identity used for inspection; otherwise uses Docker's `HOSTNAME`. Needed if a custom hostname prevents self-discovery. |
 | `DOCKER_SOCKET` | Unix socket path inside the Services container; defaults to `/var/run/docker.sock`. |
@@ -127,7 +166,7 @@ go build ./cmd/services
 
 The Go server serves `web/dist`. Run `go run ./cmd/services` after building the frontend. Native Windows development can exercise API and UI behavior, but the production Docker connector uses a Unix socket inside the Linux container.
 
-Tests use local Docker/registry HTTP fixtures and fake Compose runners; they do not update your real applications. Storage tests reopen real temporary databases. Worker and recovery tests must cover duplicate submission, dashboard restart, missing/stopped workers, and uncertain results as well as normal completion. Real socket permissions, named-volume ownership, mounted project paths, registry credentials/availability, and actual Compose recreation must also be verified on the target host.
+Tests use local Docker/registry HTTP fixtures and fake Compose runners; they do not update your real applications. Storage tests reopen real temporary databases. Worker and recovery tests must cover duplicate submission, dashboard restart, missing/stopped workers, and uncertain results as well as normal completion. Mount tests cover both named volumes and exact daemon-reported host paths, read-only/unsupported/ambiguous storage rejection, and bind-capability checks before self-update. Real socket permissions, named-volume or host-folder ownership, cross-process SQLite locking, mounted project paths, registry credentials/availability, and actual Compose recreation must also be verified on the target host.
 
 ## Versioning and publishing
 

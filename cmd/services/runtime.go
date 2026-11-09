@@ -37,7 +37,7 @@ func envDefault(key, fallback string) string {
 func durableStore() (*operations.Store, error) {
 	data := os.Getenv("SERVICES_DATA_DIR")
 	if data != "/data" {
-		return nil, errors.New("SERVICES_DATA_DIR=/data on a named volume is required")
+		return nil, errors.New("SERVICES_DATA_DIR=/data on writable persistent storage is required")
 	}
 	return operations.Open(filepath.Join(data, "operations.db"))
 }
@@ -84,14 +84,9 @@ func runWorker(id, socket string) error {
 	if inspected.Config.Labels["io.services.worker"] != "true" || inspected.Config.Labels["io.services.operation"] != id || inspected.Config.Labels["io.services.schema"] != "1" {
 		return errors.New("worker identity or schema does not match operation")
 	}
-	mounted := false
-	for _, mount := range inspected.Mounts {
-		if mount.Destination == "/data" && mount.Type == "volume" && mount.Name != "" && mount.RW {
-			mounted = true
-		}
-	}
-	if !mounted {
-		return errors.New("worker durable named volume is missing")
+	storage, err := operations.ResolveDataMount(inspected)
+	if err != nil {
+		return fmt.Errorf("worker durable storage: %w", err)
 	}
 	store, err := durableStore()
 	if err != nil {
@@ -108,6 +103,6 @@ func runWorker(id, socket string) error {
 	source := dockerapi.NewUnixSocketClient(socket)
 	checker := updates.NewChecker(updates.NewRegistryClient(nil), 0)
 	updater := composeupdate.New(os.Getenv("SERVICES_COMPOSE_HOST_ROOT"), os.Getenv("SERVICES_COMPOSE_MOUNT_ROOT"), socket)
-	executor := operations.Executor{Store: store, Source: source, Checker: checker, Updater: updater, Engine: engine, Project: envDefault("SERVICES_PROJECT_NAME", "services"), Service: envDefault("SERVICES_SERVICE_NAME", "services")}
+	executor := operations.Executor{Store: store, Source: source, Checker: checker, Updater: updater, Engine: engine, Storage: storage, Project: envDefault("SERVICES_PROJECT_NAME", "services"), Service: envDefault("SERVICES_SERVICE_NAME", "services")}
 	return executor.Execute(ctx, id)
 }

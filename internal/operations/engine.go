@@ -99,9 +99,10 @@ func (e *Engine) Inspect(ctx context.Context, id string) (Inspect, error) {
 }
 
 type WorkerConfig struct {
-	Image, User, DataDir, Volume, HostRoot, MountRoot, Socket, SocketSource, ProjectSource, Project, Service, SelfID string
-	GroupAdd                                                                                                         []string
-	SocketReadOnly                                                                                                   bool
+	Image, User, DataDir, HostRoot, MountRoot, Socket, SocketSource, ProjectSource, Project, Service, SelfID string
+	Storage                                                                                                  StorageMount
+	GroupAdd                                                                                                 []string
+	SocketReadOnly                                                                                           bool
 }
 
 var identityPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -122,10 +123,11 @@ func (e *Engine) Discover(ctx context.Context, self, dataDir, hostRoot, mountRoo
 	c.User = inspected.Config.User
 	c.GroupAdd = append([]string(nil), inspected.HostConfig.GroupAdd...)
 	c.SelfID = inspected.ID
+	c.Storage, err = ResolveDataMount(inspected)
+	if err != nil {
+		return c, err
+	}
 	for _, m := range inspected.Mounts {
-		if m.Destination == dataDir && m.Type == "volume" && m.Name != "" && m.RW {
-			c.Volume = m.Name
-		}
 		if m.Destination == mountRoot && m.Type == "bind" {
 			c.ProjectSource = m.Source
 		}
@@ -135,12 +137,18 @@ func (e *Engine) Discover(ctx context.Context, self, dataDir, hostRoot, mountRoo
 			c.SocketReadOnly = !m.RW
 		}
 	}
-	if c.Volume == "" || c.ProjectSource == "" || c.SocketSource == "" {
-		return c, errors.New("worker requires named /data volume, Compose root bind and Docker socket bind")
+	if c.ProjectSource == "" || c.SocketSource == "" {
+		return c, errors.New("worker requires Compose root and Docker socket bind mounts")
 	}
 	return c, nil
 }
 func (e *Engine) Launch(ctx context.Context, c WorkerConfig, o Operation) error {
+	if c.DataDir != "/data" {
+		return errors.New("worker durable mount destination must be /data")
+	}
+	if err := c.Storage.validate(); err != nil {
+		return err
+	}
 	type mount struct {
 		Type, Source, Target string
 		ReadOnly             bool
@@ -163,7 +171,7 @@ func (e *Engine) Launch(ctx context.Context, c WorkerConfig, o Operation) error 
 	}{Image: c.Image, User: c.User, Entrypoint: []string{"/app/services"}, Cmd: []string{"worker", "--operation", o.ID}, Env: []string{"SERVICES_DATA_DIR=" + c.DataDir, "SERVICES_COMPOSE_HOST_ROOT=" + c.HostRoot, "SERVICES_COMPOSE_MOUNT_ROOT=" + c.MountRoot, "DOCKER_SOCKET=" + c.Socket, "SERVICES_PROJECT_NAME=" + c.Project, "SERVICES_SERVICE_NAME=" + c.Service}, Labels: map[string]string{"io.services.worker": "true", "io.services.operation": o.ID, "io.services.schema": "1"}}
 	body.HostConfig.GroupAdd = append([]string(nil), c.GroupAdd...)
 	body.Healthcheck.Test = []string{"NONE"}
-	body.HostConfig.Mounts = []mount{{"volume", c.Volume, c.DataDir, false}, {"bind", c.ProjectSource, c.MountRoot, true}, {"bind", c.SocketSource, c.Socket, c.SocketReadOnly}}
+	body.HostConfig.Mounts = []mount{{c.Storage.Type, c.Storage.Source, c.DataDir, false}, {"bind", c.ProjectSource, c.MountRoot, true}, {"bind", c.SocketSource, c.Socket, c.SocketReadOnly}}
 	body.HostConfig.RestartPolicy.Name = "no"
 	body.HostConfig.NetworkMode = "bridge"
 	var created struct {
@@ -194,6 +202,10 @@ func (e *Engine) ImageID(ctx context.Context, reference string) (string, error) 
 // ValidateWorkerImage rejects Services targets that cannot participate in the
 // durable worker protocol. Call before applying a self-service replacement.
 func (e *Engine) ValidateWorkerImage(ctx context.Context, reference string) error {
+	return e.validateWorkerImage(ctx, reference, false)
+}
+
+func (e *Engine) validateWorkerImage(ctx context.Context, reference string, bindStorage bool) error {
 	var image struct {
 		Config struct {
 			Labels map[string]string
@@ -204,6 +216,9 @@ func (e *Engine) ValidateWorkerImage(ctx context.Context, reference string) erro
 	}
 	if image.Config.Labels["io.services.worker.protocol"] != "1" {
 		return errors.New("target Services image does not support worker protocol 1")
+	}
+	if bindStorage && image.Config.Labels["io.services.storage.bind"] != "1" {
+		return errors.New("target Services image does not support host-folder storage; refusing self-update before replacement")
 	}
 	return nil
 }

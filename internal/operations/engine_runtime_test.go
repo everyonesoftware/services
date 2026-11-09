@@ -65,7 +65,7 @@ func TestHelperDisablesInheritedHTTPHealthcheck(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	if err := NewEngine(server.URL, server.Client()).Launch(context.Background(), WorkerConfig{Image: "sha256:exact"}, Operation{Worker: "helper"}); err != nil {
+	if err := NewEngine(server.URL, server.Client()).Launch(context.Background(), WorkerConfig{Image: "sha256:exact", DataDir: "/data", Storage: StorageMount{Type: "volume", Source: "services-data"}}, Operation{Worker: "helper"}); err != nil {
 		t.Fatal(err)
 	}
 	health, ok := payload["Healthcheck"].(map[string]any)

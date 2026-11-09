@@ -1,0 +1,12 @@
+# Optional permanent override for compose.yaml (or your existing Compose file).
+# Create ./data first and make it writable by the container's services user.
+# Do not switch storage while Services or any of its workers is running.
+services:
+  services:
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+        read_only: false
+        bind:
+          create_host_path: false
