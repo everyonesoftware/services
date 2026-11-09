@@ -5,7 +5,8 @@ import { iconForImage, iconForProject } from './brandIcons.js'
 import type { BrandIcon } from './brandIcons.js'
 
 function ServiceIcon({ icon, project = false }: { icon?: BrandIcon; project?: boolean }) {
-  return <svg className={`service-icon${icon ? '' : ' neutral-icon'}`} data-brand={icon?.slug || (project ? 'stack' : 'container')} aria-hidden="true" focusable="false" viewBox="0 0 24 24" style={icon ? { color: `#${icon.hex}` } : undefined}>
+  // Inset the artwork inside the SVG viewport, not with CSS padding on the SVG.
+  return <svg className={`service-icon${icon ? '' : ' neutral-icon'}`} data-brand={icon?.slug || (project ? 'stack' : 'container')} aria-hidden="true" focusable="false" viewBox="-4 -4 32 32" style={icon ? { color: `#${icon.hex}` } : undefined}>
     {icon ? <><title>{icon.title}</title><path d={icon.path} fill="currentColor" /></> : project
       ? <path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4" />
       : <path d="m3 7 9-4 9 4v10l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v10M7.5 5l9 4" />}

@@ -135,6 +135,19 @@ test('project and container names have local decorative brand icons and unknowns
   assert.match(unknown, /site-web-1/)
 })
 
+test('brand and fallback SVG viewports leave breathing room around the complete artwork', () => {
+  for (const image of ['tailscale/tailscale:stable', 'lscr.io/linuxserver/qbittorrent:latest', 'custom/unknown:latest']) {
+    const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, containers: [{ ...fixture.containers[0], image }] }, onReview() {}, actionsDisabled: false }))
+    const icons = [...html.matchAll(/<svg class="service-icon[^>]*viewBox="([^"]+)"/g)]
+    assert.equal(icons.length, 2)
+    for (const [, viewBox] of icons) {
+      const [x, y, width, height] = viewBox.split(' ').map(Number)
+      assert.ok(x <= -3 && y <= -3 && x + width >= 27 && y + height >= 27, `${image}: ${viewBox} must surround the 0–24 artwork with a safe inset`)
+      assert.equal(width, height)
+    }
+  }
+})
+
 test('monitor starts honestly connecting, with accessible search and filters, not a connected claim or fabricated counts', () => {
   const html = renderToStaticMarkup(createElement(components.default))
   assert.match(html, /<h1>Monitor<\/h1>/)
