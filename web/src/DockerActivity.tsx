@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Operation } from './types.ts'
 import { acknowledgeOperation } from './api.ts'
+import { compactOperationOutput } from './operationOutput.ts'
 
 const timestamp = (value?: string) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleTimeString() : '—'
 const phaseLabels: Record<string, string> = { preparing: 'Preparing', pulling: 'Pulling', applying: 'Applying', verifying: 'Verifying', recovering: 'Recovering' }
@@ -37,10 +38,26 @@ export function DockerActivity({ operations, loading, error, onAcknowledged }: {
 
 function OperationRow({ operation }: { operation: Operation }) {
   const [follow, setFollow] = useState(true)
-  const output = useRef<HTMLPreElement>(null)
-  useEffect(() => { if (follow && output.current) output.current.scrollTop = output.current.scrollHeight }, [follow, operation.messages])
+  const [raw, setRaw] = useState(false)
+  const output = useRef<HTMLDivElement>(null)
+  const rows = useMemo(() => compactOperationOutput(operation.messages), [operation.messages])
+  const progressRows = rows.filter(row => row.id)
+  const latest = progressRows.length ? `Progress updates in place · ${progressRows.length} tracked items` : rows.at(-1)?.text
+  useEffect(() => { if (follow && output.current) output.current.scrollTop = output.current.scrollHeight }, [follow, raw, operation.messages])
   return <details className={`operation-row ${operation.state}`}>
     <summary><span className={`status-badge ${operation.state === 'error' ? 'bad' : operation.state === 'complete' ? 'good' : 'caution'}`}>{stateLabel(operation)}</span><span className="operation-identity"><strong>{operation.project || 'Container action'}</strong><span>{operation.action}</span></span><span className="operation-time">{operation.finishedAt ? 'Finished' : operation.startedAt ? 'Started' : 'Queued'} <time>{timestamp(operation.finishedAt || operation.startedAt || operation.queuedAt)}</time></span><span className="disclosure" aria-hidden="true">›</span></summary>
-    <div className="operation-inspection"><p className="operation-latest">{operation.error || operation.messages.at(-1) || 'Waiting for its turn. Docker state will be checked when the update starts.'}</p><div className="operation-output"><div className="output-heading"><h3>Command output</h3><label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow output</label></div><pre ref={output} tabIndex={0} aria-label={`${operation.project} operation log`}>{operation.messages.join('\n') || 'No output yet.'}</pre></div><p className="operation-timestamps">Queued {timestamp(operation.queuedAt)}{operation.startedAt && ` · Started ${timestamp(operation.startedAt)}`}{operation.finishedAt && ` · Finished ${timestamp(operation.finishedAt)}`}</p></div>
+    <div className="operation-inspection">
+      <p className="operation-latest">{operation.error || latest || 'Waiting for its turn. Docker state will be checked when the update starts.'}</p>
+      <div className="operation-output">
+        <div className="output-heading"><h3>{raw ? 'Raw command output' : 'Live command output'}</h3><div className="output-controls"><label><input type="checkbox" checked={raw} onChange={event => setRaw(event.target.checked)} /> Show raw output</label><label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Follow output</label></div></div>
+        <div className="operation-terminal" ref={output} tabIndex={0} aria-label={`${operation.project} operation log`}>
+          {raw ? <pre>{operation.messages.join('\n') || 'No output yet.'}</pre> : rows.length ? rows.map(row => row.id ? <div className="output-progress-row" key={row.key}>
+            <div className="output-progress-label"><code>{row.id}</code><span>{row.status}</span><span className="output-transfer">{row.detail}{row.percent !== undefined && ` · ${Math.round(row.percent)}%`}</span></div>
+            {row.percent !== undefined && <progress value={row.percent} max={100} aria-label={`${row.id} ${row.status}`} />}
+          </div> : <div className="output-log-line" key={row.key}>{row.text}</div>) : 'No output yet.'}
+        </div>
+      </div>
+      <p className="operation-timestamps">Queued {timestamp(operation.queuedAt)}{operation.startedAt && ` · Started ${timestamp(operation.startedAt)}`}{operation.finishedAt && ` · Finished ${timestamp(operation.finishedAt)}`}</p>
+    </div>
   </details>
 }
