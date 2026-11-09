@@ -390,6 +390,24 @@ func (r execRunner) Run(ctx context.Context, workingDir string, composeArgs []st
 	return nil
 }
 
+// Output captures resolved configuration privately. Neither stdout nor stderr
+// may enter operation logs: interpolation can include credentials.
+func (r execRunner) Output(ctx context.Context, workingDir string, composeArgs []string) ([]byte, error) {
+	if r.dockerSocket == "" || !path.IsAbs(r.dockerSocket) {
+		return nil, fmt.Errorf("Docker socket path must be absolute")
+	}
+	args := append([]string{"--host", "unix://" + r.dockerSocket, "compose"}, composeArgs...)
+	command := exec.CommandContext(ctx, "docker", args...)
+	command.Dir = workingDir
+	command.Env = composeEnvironment(os.Environ())
+	command.WaitDelay = time.Second
+	data, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("private Compose configuration command failed")
+	}
+	return data, nil
+}
+
 func composeEnvironment(_ []string) []string {
 	return []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",

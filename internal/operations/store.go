@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"services/internal/composeupdate"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -23,22 +25,23 @@ var ErrFull = errors.New("Compose operation queue is full")
 var ErrConflict = errors.New("idempotency key was already used for a different action")
 
 type Operation struct {
-	ExpectedImages map[string]string `json:"expectedImages,omitempty"`
-	ID             string            `json:"id"`
-	Project        string            `json:"project"`
-	Action         string            `json:"action"`
-	Target         string            `json:"target,omitempty"`
-	State          string            `json:"state"`
-	Phase          string            `json:"phase,omitempty"`
-	SelfUpdate     bool              `json:"selfUpdate,omitempty"`
-	NeedsAttention bool              `json:"needsAttention,omitempty"`
-	Worker         string            `json:"worker,omitempty"`
-	QueuedAt       string            `json:"queuedAt"`
-	StartedAt      string            `json:"startedAt,omitempty"`
-	FinishedAt     string            `json:"finishedAt,omitempty"`
-	Messages       []string          `json:"messages"`
-	Error          string            `json:"error,omitempty"`
-	QueuePosition  int               `json:"queuePosition"`
+	Plan           *composeupdate.UpdatePlan `json:"plan,omitempty"`
+	ExpectedImages map[string]string         `json:"expectedImages,omitempty"`
+	ID             string                    `json:"id"`
+	Project        string                    `json:"project"`
+	Action         string                    `json:"action"`
+	Target         string                    `json:"target,omitempty"`
+	State          string                    `json:"state"`
+	Phase          string                    `json:"phase,omitempty"`
+	SelfUpdate     bool                      `json:"selfUpdate,omitempty"`
+	NeedsAttention bool                      `json:"needsAttention,omitempty"`
+	Worker         string                    `json:"worker,omitempty"`
+	QueuedAt       string                    `json:"queuedAt"`
+	StartedAt      string                    `json:"startedAt,omitempty"`
+	FinishedAt     string                    `json:"finishedAt,omitempty"`
+	Messages       []string                  `json:"messages"`
+	Error          string                    `json:"error,omitempty"`
+	QueuePosition  int                       `json:"queuePosition"`
 }
 
 type Store struct {

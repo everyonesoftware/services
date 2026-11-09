@@ -1,7 +1,6 @@
 package composeupdate
 
 import (
-	"context"
 	"errors"
 	"services/internal/groups"
 	"strings"
@@ -9,20 +8,18 @@ import (
 )
 
 func TestVerifiedUpdateDoesNotReplaceBeforeImageValidation(t *testing.T) {
-	r := &recordingRunner{}
-	u, c, _ := testUpdater(t, r)
-	c.UpdateAvailable = true
-	err := u.UpdateProjectVerified(context.Background(), []groups.Container{c}, func(string) (string, error) { return "", errors.New("image unavailable") }, func(groups.Container, string) error { t.Fatal("verification before apply"); return nil })
+	u, members, r, ctx, _, _ := networkFixture(t)
+	c := members[0]
+	err := u.UpdateProjectVerified(ctx, []groups.Container{c}, func(string) (string, error) { return "", errors.New("image unavailable") }, func(groups.Container, string) error { t.Fatal("verification before apply"); return nil })
 	if err == nil || len(r.calls) != 1 {
 		t.Fatalf("applied unvalidated image: %v %+v", err, r.calls)
 	}
 }
 func TestVerifiedUpdateRequiresReplacementVerification(t *testing.T) {
-	r := &recordingRunner{}
-	u, c, _ := testUpdater(t, r)
-	c.UpdateAvailable = true
+	u, members, r, ctx, _, _ := networkFixture(t)
+	c := members[0]
 	count := 0
-	err := u.UpdateProjectVerified(context.Background(), []groups.Container{c}, func(string) (string, error) { return "sha256:pulled", nil }, func(g groups.Container, image string) error {
+	err := u.UpdateProjectVerified(ctx, []groups.Container{c}, func(string) (string, error) { return "sha256:pulled", nil }, func(g groups.Container, image string) error {
 		count++
 		if image != "sha256:pulled" {
 			t.Fatal(image)

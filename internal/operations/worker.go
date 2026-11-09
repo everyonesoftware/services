@@ -140,17 +140,42 @@ func (w *Executor) Execute(parent context.Context, id string) (result error) {
 		return errors.New("Services service identity is not configured")
 	}
 	progress("Starting Compose " + o.Action + " for " + o.Project)
-	err = w.Updater.UpdateProjectVerified(ctx, members, func(reference string) (string, error) {
-		for _, member := range members {
-			if self && member.Service == w.Service && member.UpdateAvailable && member.Image == reference {
-				if err := w.Engine.validateWorkerImage(ctx, reference, w.Storage.Type == "bind"); err != nil {
-					return "", err
+	ctx = composeupdate.WithNetworkRuntime(ctx, composeupdate.NetworkRuntime{
+		Inspect: func(ctx context.Context, reference string) (composeupdate.NetworkContainer, error) {
+			actual, err := w.Engine.Inspect(ctx, reference)
+			return composeupdate.NetworkContainer{ID: actual.ID, Image: actual.Image, Name: actual.Name,
+				Project: actual.Config.Labels["com.docker.compose.project"], Service: actual.Config.Labels["com.docker.compose.service"],
+				Running: actual.State.Running, NetworkMode: actual.HostConfig.NetworkMode}, err
+		},
+		Persist: func(plan composeupdate.UpdatePlan) error {
+			return w.Store.Change(id, func(operation *Operation) {
+				operation.Plan = &plan
+				operation.ExpectedImages = map[string]string{}
+				for _, service := range plan.Services {
+					operation.ExpectedImages[service.Service] = service.ExpectedImage
 				}
-			}
-		}
+			})
+		},
+	})
+	err = w.Updater.UpdateProjectVerified(ctx, members, func(reference string) (string, error) {
 		image, err := w.Engine.ImageID(ctx, reference)
 		if err != nil {
 			return "", err
+		}
+		for _, member := range members {
+			if self && member.Service == w.Service && member.UpdateAvailable && member.Image == reference {
+				old, err := w.Engine.Inspect(ctx, member.ID)
+				if err != nil {
+					return "", err
+				}
+				// Reattaching the installed immutable image does not introduce a
+				// new worker protocol or storage capability requirement.
+				if old.Image != image {
+					if err := w.Engine.validateWorkerImage(ctx, reference, w.Storage.Type == "bind"); err != nil {
+						return "", err
+					}
+				}
+			}
 		}
 		err = w.Store.Change(id, func(operation *Operation) {
 			if operation.ExpectedImages == nil {

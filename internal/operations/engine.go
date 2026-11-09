@@ -81,7 +81,8 @@ type Inspect struct {
 		Health   *struct{ Status string }
 	}
 	HostConfig struct {
-		GroupAdd []string
+		NetworkMode string
+		GroupAdd    []string
 	}
 	Mounts []struct {
 		Type        string
