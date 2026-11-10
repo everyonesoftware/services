@@ -1,4 +1,34 @@
-import type { Operation, UpdateEvent } from './types.ts'
+import type { Icon, IconList, IconTarget, Operation, UpdateEvent } from './types.ts'
+
+async function iconRequest<T>(url: string, options: RequestInit, fetcher: typeof fetch, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(options.method === 'GET' ? 'Icon request timed out.' : 'Icon request timed out; the outcome is unconfirmed. Refresh before retrying.'))
+      controller.abort()
+    }, timeoutMs)
+  })
+  const request = async () => {
+    const response = await fetcher(url, { ...options, signal: controller.signal })
+    if (!response.ok) throw new Error((await response.text()).trim() || `Icon request failed (${response.status})`)
+    return response.status === 204 ? undefined as T : await response.json() as T
+  }
+  try { return await Promise.race([request(), timeout]) }
+  finally { clearTimeout(timer) }
+}
+
+export function getIcons(fetcher: typeof fetch = fetch, timeoutMs = 12_000): Promise<IconList> {
+  return iconRequest('/api/icons', { method: 'GET', cache: 'no-store' }, fetcher, timeoutMs)
+}
+
+export function saveIcon(target: IconTarget, url: string, fetcher: typeof fetch = fetch, timeoutMs = 30_000): Promise<Icon> {
+  return iconRequest('/api/icons', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: target.kind, key: target.key, url }) }, fetcher, timeoutMs)
+}
+
+export function deleteIcon(target: IconTarget, fetcher: typeof fetch = fetch, timeoutMs = 12_000): Promise<void> {
+  return iconRequest(`/api/icons?kind=${encodeURIComponent(target.kind)}&key=${encodeURIComponent(target.key)}`, { method: 'DELETE' }, fetcher, timeoutMs)
+}
 
 export async function checkForUpdates(fetcher: typeof fetch = fetch): Promise<void> {
   const response = await fetcher('/api/updates/check', { method: 'POST' })

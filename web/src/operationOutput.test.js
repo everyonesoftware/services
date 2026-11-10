@@ -4,7 +4,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
-const server = await createServer({ server: { middlewareMode: true, hmr: false }, appType: 'custom' })
+const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom' })
 after(() => server.close())
 const output = await server.ssrLoadModule('/src/operationOutput.ts')
 

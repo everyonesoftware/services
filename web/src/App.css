@@ -72,7 +72,8 @@ h1 { font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -1.2p
 .group-identity strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .identity-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .identity-name > span { min-width: 0; overflow-wrap: anywhere; }
-.service-icon { width: 20px; height: 20px; flex: none; }
+.service-icon { width: 20px; height: 20px; flex: none; background: #eeeeee; border-radius: 50%; object-fit: contain; padding: 3px; }
+.service-icon.neutral-icon { padding: 0; }
 .group-identity .service-icon { width: 22px; height: 22px; }
 .neutral-icon { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
 .group-identity > span { font-size: 10px; color: var(--muted); }
@@ -300,5 +301,36 @@ input[type=checkbox] { accent-color: var(--teal); }
 @media (max-width: 600px) {
   .monitor-details > summary { min-height: 44px; }
   .monitor-details { margin: 0 0 10px; }
+}
+.icon-button { position: relative; display: inline-flex; flex: none; width: 20px; height: 20px; border: 0; padding: 0; border-radius: 50%; background: none; color: inherit; }
+.group-identity .icon-button { width: 22px; height: 22px; }
+.icon-button .service-icon { display: block; }
+.icon-button::after { content: '✎'; position: absolute; right: -4px; bottom: -3px; width: 14px; height: 14px; line-height: 12px; font-size: 10px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--teal); opacity: 0; pointer-events: none; }
+.icon-button:hover::after, .icon-button:focus-visible::after { opacity: 1; }
+.icon-dialog { width: min(460px, calc(100vw - 28px)); max-width: 460px; }
+.icon-dialog > form { display: flex; flex-direction: column; min-height: 0; max-height: inherit; }
+.icon-dialog .dialog-header { padding: 21px 22px 14px; }
+.icon-dialog .dialog-header h2 { font-size: 19px; margin: 3px 0 4px; }
+.icon-dialog .dialog-header > p { font-size: 11px; line-height: 1.6; }
+.icon-editor-body { padding: 0 22px 22px; }
+.icon-preview { display: flex; align-items: center; gap: 14px; padding: 13px; border: 1px solid var(--border); border-radius: 6px; background: #f5f5ef; margin-bottom: 18px; }
+.icon-preview .service-icon { width: 54px; height: 54px; padding: 8px; }
+.icon-preview .neutral-icon { padding: 0; }
+.icon-preview strong, .icon-field-label { display: block; font-size: 12px; font-weight: 600; }
+.icon-preview p, .icon-help, .icon-storage { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.icon-field-label { margin-bottom: 6px; }
+.icon-url { width: 100%; border: 1px solid #bcc4b8; border-radius: 5px; background: var(--surface); color: #323d33; padding: 10px; font-size: 12px; min-height: 42px; }
+.icon-help { margin-top: 7px; }
+.icon-error { font-size: 11px; color: #97523d; margin-top: 7px; overflow-wrap: anywhere; }
+.icon-error:empty { margin: 0; }
+.icon-storage { border-top: 1px solid var(--border); padding-top: 13px; margin-top: 16px; }
+.icon-storage strong { font-weight: 600; color: #454f40; }
+.icon-dialog .dialog-actions { padding: 14px 22px; gap: 8px; }
+.icon-dialog .icon-reset { margin-right: auto; border-color: transparent; background: none; padding: 0; color: var(--muted); font-weight: 400; font-size: 11px; }
+@media (max-width: 600px) {
+  .icon-dialog .dialog-header { padding: 17px 16px 12px; }
+  .icon-editor-body { padding: 0 16px 18px; }
+  .icon-dialog .dialog-actions { padding: 12px 16px; }
+  .icon-dialog .icon-reset { flex: 0 0 100%; justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }

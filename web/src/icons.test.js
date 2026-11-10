@@ -1,0 +1,98 @@
+import test, { after } from 'node:test'
+import assert from 'node:assert/strict'
+import * as api from './api.ts'
+
+const target = { kind: 'container', key: 'media / jellyfin &+?#一' }
+const icon = { ...target, url: '/api/icons/images/abc.png', sourceUrl: 'https://example.com/icon.png' }
+test('icon API lists readiness, saves source URLs and deletes exact encoded stable keys', async () => {
+  assert.equal(typeof api.getIcons, 'function')
+  const calls = []
+  const fetcher = async (url, options) => {
+    calls.push([url, options])
+    return options.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json(options.method === 'PUT' ? icon : { available: true, icons: [icon] })
+  }
+  assert.deepEqual(await api.getIcons(fetcher), { available: true, icons: [icon] })
+  assert.deepEqual(await api.saveIcon(target, icon.sourceUrl, fetcher), icon)
+  await api.deleteIcon(target, fetcher)
+  assert.equal(calls[0][0], '/api/icons')
+  assert.equal(calls[0][1].cache, 'no-store')
+  assert.equal(calls[1][0], '/api/icons')
+  assert.equal(calls[1][1].method, 'PUT')
+  assert.equal(calls[1][1].headers['Content-Type'], 'application/json')
+  assert.deepEqual(JSON.parse(calls[1][1].body), { ...target, url: icon.sourceUrl })
+  assert.equal(calls[2][0], '/api/icons?kind=container&key=media%20%2F%20jellyfin%20%26%2B%3F%23%E4%B8%80')
+  assert.ok(calls.every(([, options]) => options.signal instanceof AbortSignal))
+})
+
+test('verified icon mutations refresh before success and reject stale or unavailable readback', async () => {
+  const icons = await import('./icons.ts')
+  const requests = []
+  const fetcher = async (url, options) => { requests.push(options.method); return Response.json(options.method === 'PUT' ? icon : { available: true, icons: [icon] }) }
+  assert.deepEqual(await icons.changeIcon(target, icon.sourceUrl, fetcher), { available: true, icons: [icon] })
+  assert.deepEqual(requests, ['PUT', 'GET'])
+  for (const list of [{ available: false, icons: [icon] }, { available: true, icons: [] }, { available: true, icons: [{ ...icon, sourceUrl: 'https://example.com/other.png' }] }]) {
+    await assert.rejects(icons.changeIcon(target, icon.sourceUrl, async (_url, options) => Response.json(options.method === 'PUT' ? icon : list)), /could not be verified/i)
+  }
+  await assert.rejects(icons.changeIcon(target, icon.sourceUrl, async (_url, options) => Response.json(options.method === 'PUT' ? { ...icon, kind: 'project' } : { available: true, icons: [icon] })), /could not be verified/i)
+  const resetCalls = []
+  assert.deepEqual(await icons.changeIcon(target, null, async (_url, options) => { resetCalls.push(options.method); return options.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({ available: true, icons: [] }) }), { available: true, icons: [] })
+  assert.deepEqual(resetCalls, ['DELETE', 'GET'])
+  await assert.rejects(icons.changeIcon(target, null, async (_url, options) => options.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({ available: true, icons: [icon] })), /could not be verified/i)
+})
+
+test('image URL validation permits HTTP(S) only without guessing extensions', async () => {
+  const { imageUrlError } = await import('./icons.ts')
+  for (const url of ['', 'ftp://example.com/icon.png', 'javascript:alert(1)', '/icons/a.png', 'https://user:pass@example.com/a.png']) assert.ok(imageUrlError(url), url)
+  for (const url of ['https://example.com/image?id=1', 'http://example.com/a.gif', 'https://example.com/a.JPG']) assert.equal(imageUrlError(url), '')
+})
+
+const server = await (await import('vite')).createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom' })
+after(() => server.close())
+
+test('compact native icon dialog has scoped heading, local current preview, URL field and explicit actions', async () => {
+  const { IconDialog } = await server.ssrLoadModule('/src/IconDialog.tsx')
+  const { createElement } = await import('react')
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  for (const kind of ['project', 'container']) {
+    const html = renderToStaticMarkup(createElement(IconDialog, { target: { ...target, kind, current: icon, automatic: { src: '/icons/nginx.png', slug: 'nginx', name: 'Nginx' } }, available: true, onClose() {}, onSaved() {} }))
+    assert.match(html, /<dialog[^>]*class="update-dialog icon-dialog"/)
+    assert.match(html, /aria-labelledby="icon-title"/)
+    assert.match(html, /Edit media \/ jellyfin &amp;\+\?#一 icon/)
+    assert.match(html, new RegExp(kind === 'project' ? 'container icons stay unchanged' : 'project icon stays unchanged'))
+    assert.match(html, /src="\/api\/icons\/images\/abc.png"/)
+    assert.match(html, /type="url"/)
+    assert.match(html, /value="https:\/\/example.com\/icon.png"/)
+    assert.match(html, /role="alert"/)
+    assert.match(html, /PNG, JPEG or GIF/)
+    assert.match(html, /2 MiB.*4 million pixels.*4096/)
+    assert.match(html, /SVG is not supported/)
+    assert.match(html, /Download &amp; save/)
+    assert.match(html, /Use default icon/)
+    assert.match(html, />Cancel</)
+  }
+})
+
+test('App polls icons independently, gates editing on readiness and wires verified readback without hiding monitoring', async () => {
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  assert.match(source, /usePolling<IconList>\('\/api\/icons'/)
+  assert.match(source, /iconsRequest\.data\?\.available/)
+  assert.match(source, /!iconsRequest\.error/)
+  assert.match(source, /onEditIcon=\{setIconTarget\}/)
+  assert.match(source, /<IconDialog/)
+  assert.match(source, /iconsRequest\.replace\(next\)/)
+  assert.doesNotMatch(source, /const error =[^\n]*iconsRequest/)
+})
+
+test('icon requests preserve failures and time out even if fetch ignores abort', async () => {
+  assert.equal(typeof api.getIcons, 'function')
+  for (const request of [f => api.getIcons(f), f => api.saveIcon(target, icon.sourceUrl, f), f => api.deleteIcon(target, f)]) {
+    await assert.rejects(request(async () => new Response('Image is too large', { status: 413 })), /Image is too large/)
+    await assert.rejects(request(async () => new Response('', { status: 503 })), /503/)
+  }
+  let signal
+  await assert.rejects(api.saveIcon(target, icon.sourceUrl, (_url, options) => { signal = options.signal; return new Promise(() => {}) }, 10), /timed out.*unconfirmed/i)
+  assert.equal(signal.aborted, true)
+  await assert.rejects(api.getIcons(() => new Promise(() => {}), 10), /timed out/i)
+  await assert.rejects(api.deleteIcon(target, () => new Promise(() => {}), 10), /timed out/i)
+})

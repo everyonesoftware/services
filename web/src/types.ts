@@ -41,6 +41,9 @@ export type Incident = { id: string; project: string; service: string; name: str
 export type MonitorEvent = { id: string; project: string; name: string; kind: string; message: string; time: string }
 export type Monitor = { connected: boolean; lastChecked: string | null; error: string | null; incidents: Incident[]; events: MonitorEvent[]; notificationConfigured: boolean }
 export type UpdateEvent = { type: 'accepted' | 'progress' | 'complete' | 'error'; message: string; operationId?: string }
+export type IconTarget = { kind: 'project' | 'container'; key: string }
+export type Icon = IconTarget & { url: string; sourceUrl: string }
+export type IconList = { available: boolean; icons: Icon[] }
 export type Filter = 'all' | 'attention' | 'updates'
 export type Operation = {
   id: string

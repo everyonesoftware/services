@@ -1,8 +1,7 @@
 export interface BrandIcon {
   title: string
   slug: string
-  hex: string
-  path: string
+  src: string
 }
 
 export function iconForImage(image?: string): BrandIcon | undefined

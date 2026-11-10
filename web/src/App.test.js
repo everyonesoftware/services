@@ -3,11 +3,50 @@ import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
+import { readFileSync } from 'node:fs'
 
-const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
+const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom' })
 after(() => server.close())
 const components = await server.ssrLoadModule('/src/App.tsx')
 const fixture = { name: 'site', status: 'unhealthy', containers: [{ id: 'web', name: 'site-web-1', project: 'site', service: 'web', image: 'nginx:stable', state: 'running', health: 'unhealthy', monitorStatus: 'unhealthy', monitorReason: 'Probe failed', restartCount: 4, healthOutput: 'Connection refused <script>', updateAvailable: true, currentDigest: 'sha256:old', proposedDigest: 'sha256:new' }] }
+
+test('project and container icons share a light gray circular background without cropping artwork', () => {
+  const css = readFileSync(new URL('./App.css', import.meta.url), 'utf8')
+  const iconStyle = css.match(/\.service-icon\s*\{([^}]+)\}/)[1]
+  assert.match(iconStyle, /background:\s*#eeeeee\s*;/)
+  assert.match(iconStyle, /border-radius:\s*50%\s*;/)
+  assert.match(iconStyle, /object-fit:\s*contain\s*;/)
+  assert.match(iconStyle, /padding:\s*3px\s*;/)
+  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: fixture, onReview() {}, actionsDisabled: false }))
+  assert.equal((html.match(/class="service-icon/g) || []).length, 2)
+  assert.equal((html.match(/<img /g) || []).length, 2)
+})
+
+test('icon editing uses independent project and stable container-name overrides only when ready', () => {
+  const props = { project: fixture, onReview() {}, actionsDisabled: false, onEditIcon() {}, iconsAvailable: true, icons: [
+    { kind: 'project', key: 'site', url: '/api/icons/images/project.png', sourceUrl: 'https://example.com/p.png' },
+    { kind: 'container', key: 'site-web-1', url: '/api/icons/images/container.png', sourceUrl: 'https://example.com/c.png' },
+    { kind: 'container', key: 'web', url: '/api/icons/images/wrong-id.png', sourceUrl: 'https://example.com/wrong.png' },
+  ] }
+  const html = renderToStaticMarkup(createElement(components.ProjectGroup, props))
+  assert.match(html, /src="\/api\/icons\/images\/project.png"/)
+  assert.match(html, /src="\/api\/icons\/images\/container.png"/)
+  assert.doesNotMatch(html, /wrong-id|https:\/\/example.com/)
+  assert.match(html, /<button[^>]*class="icon-button"[^>]*aria-label="Edit site project icon"/)
+  assert.match(html, /aria-label="Edit site-web-1 container icon"/)
+  assert.equal((html.match(/class="icon-button"/g) || []).length, 2)
+  const unavailable = renderToStaticMarkup(createElement(components.ProjectGroup, { ...props, iconsAvailable: false }))
+  assert.doesNotMatch(unavailable, /class="icon-button"/)
+  assert.match(unavailable, /site-web-1/)
+})
+
+test('pencil is hidden except on the icon button hover or keyboard focus, and dialog is compact', () => {
+  const css = readFileSync(new URL('./App.css', import.meta.url), 'utf8')
+  assert.match(css, /\.icon-button::after\s*\{[^}]*opacity:\s*0/)
+  assert.match(css, /\.icon-button:hover::after,\s*\.icon-button:focus-visible::after\s*\{[^}]*opacity:\s*1/)
+  assert.doesNotMatch(css, /(?:summary|identity|row)[^{}]*:hover[^{}]*\.icon-button/)
+  assert.match(css, /\.icon-dialog\s*\{[^}]*max-width:\s*460px/)
+})
 
 test('expandable groups expose reasons, health output and restart details; updates use a group review action', () => {
   assert.equal(typeof components.ProjectGroup, 'function')
@@ -214,26 +253,28 @@ test('healthy rows avoid redundant health prose and duplicate container names', 
   assert.match(summary, /Healthy/)
 })
 
-test('project and container names have local decorative brand icons and unknowns have neutral icons', () => {
+test('project and container names have bundled decorative brand images and unknowns have neutral icons', () => {
   const container = { ...fixture.containers[0], image: 'tailscale/tailscale:stable', service: 'vpn' }
   const render = (image) => renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, name: 'my-vpn', containers: [{ ...container, image }] }, onReview() {}, actionsDisabled: false }))
   const html = render(container.image)
   assert.equal((html.match(/data-brand="tailscale"/g) || []).length, 2)
   for (const name of ['my-vpn', 'vpn']) {
-    assert.match(html, new RegExp(`class="identity-name"><svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?</svg><span>${name}</span>`))
+    assert.match(html, new RegExp(`class="identity-name"><img[^>]*aria-hidden="true"[^>]*><span>${name}</span>`))
   }
-  assert.doesNotMatch(html, /<img|https?:\/\//)
+  assert.equal((html.match(/src="\/icons\/tailscale.png"/g) || []).length, 2)
+  assert.equal((html.match(/alt=""/g) || []).length, 2)
+  assert.doesNotMatch(html, /https?:\/\//)
   const unknown = render('custom/unknown:latest')
   assert.match(unknown, /data-brand="stack"/)
   assert.match(unknown, /data-brand="container"/)
   assert.match(unknown, /site-web-1/)
 })
 
-test('brand and fallback SVG viewports leave breathing room around the complete artwork', () => {
+test('image artwork is contained and neutral SVG viewports retain breathing room', () => {
   for (const image of ['tailscale/tailscale:stable', 'lscr.io/linuxserver/qbittorrent:latest', 'custom/unknown:latest']) {
     const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, containers: [{ ...fixture.containers[0], image }] }, onReview() {}, actionsDisabled: false }))
     const icons = [...html.matchAll(/<svg class="service-icon[^>]*viewBox="([^"]+)"/g)]
-    assert.equal(icons.length, 2)
+    assert.equal(icons.length, image === 'custom/unknown:latest' ? 2 : 0)
     for (const [, viewBox] of icons) {
       const [x, y, width, height] = viewBox.split(' ').map(Number)
       assert.ok(x <= -3 && y <= -3 && x + width >= 27 && y + height >= 27, `${image}: ${viewBox} must surround the 0–24 artwork with a safe inset`)

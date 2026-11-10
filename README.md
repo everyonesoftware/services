@@ -16,11 +16,21 @@ Monitoring runs on the server, not in a browser tab. The dashboard shows active 
 
 ### Service icons
 
-Project and container names have small, locally bundled SVG icons. Recognized applications use the existing Simple Icons brand artwork and colors; each icon's upstream source and any brand guidelines are recorded in that dependency's metadata. No external image requests or runtime logo-search service are used.
+Project and container names have small, locally bundled official GitHub organization avatars or application artwork, with light gray circular backgrounds. Asset provenance is recorded in `web/public/icons/sources.json`. No external image requests or runtime logo-search service are used while displaying icons.
 
 The curated mapping in `web/src/brandIcons.js` matches image repository basenames and explicit aliases, ignoring registry hosts, namespaces, tags, and digests. It does not guess from container names or treat a brand string anywhere in an image reference as a match. Custom images and applications outside the mapping receive a neutral container icon rather than an invented logo.
 
 A Compose project uses its single recognized application brand, ignoring Tailscale sidecars. Tailscale-only projects use Tailscale; mixed application brands, unknown applications with only a recognized VPN sidecar, and the Standalone group use a neutral stack icon. Container rows always keep their individual image's icon, and health indicators remain separate.
+
+#### Custom project and container icons
+
+Hover over a project or container icon to reveal its pencil, or focus it with the keyboard, then click to open **Edit icon**. Paste a direct image URL and choose **Download & save**. Services downloads and validates the image, normalizes it to PNG, and stores a local copy under `SERVICES_DATA_DIR/icons` (`/data/icons` in the supplied Compose deployment). Reloading the dashboard serves that stored copy; it does not contact the original image host. **Use default icon** removes the override and restores automatic artwork. Cancel and failed downloads leave the current icon unchanged.
+
+Project overrides and individual container overrides are independent. Projects are identified by project name; container overrides use the full container name, not the replaceable Docker ID, so ordinary recreation with the same name preserves the override. Renaming a project or container gives it a different identity. No Compose or container changes are made by editing an icon.
+
+Sources must be public HTTP(S) image URLs returning PNG, JPEG, or GIF (the first frame is used). Downloads are limited to 2 MiB and images to 4 million pixels, with neither side exceeding 4096 pixels. SVG, HTML, credentials in URLs, and private, loopback, link-local, or other non-public network destinations are rejected. Redirect destinations are checked too. Use a public image URL rather than a LAN/Tailscale favicon URL. These restrictions apply only to importing custom artwork; monitoring and the locally bundled default icons still work offline.
+
+Custom icon editing requires an explicitly configured absolute, writable persistent `SERVICES_DATA_DIR`. If storage cannot be initialized, editing is disabled without disabling monitoring. If a metadata write cannot be confirmed durable, editing is disabled until Services restarts and reloads the visible metadata; a failed request is not proof that no disk change occurred. Resolve storage errors before restarting or retrying. Keep the entire icons subfolder with your data backup. Like existing dashboard actions, icon mutations use the configured Origin/Host checks and rely on your trusted network or authenticated proxy for access control; they do not add a login system.
 
 ### Notifications
 

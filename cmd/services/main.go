@@ -60,6 +60,9 @@ func main() {
 		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
 	}
 	handler.SetActionSource(source)
+	if err := configureIcons(handler); err != nil {
+		log.Printf("Custom icon editing disabled: %v", err)
+	}
 	publications, err := configurePublications(handler, checker)
 	if err != nil {
 		log.Printf("Publication notifications disabled: %v", err)

@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import { iconForImage, iconForProject } from './brandIcons.js'
-import { siJellyfin, siTailscale } from 'simple-icons'
+const siJellyfin = iconForImage('jellyfin/jellyfin')
+const siTailscale = iconForImage('tailscale/tailscale')
+
+test('recognized apps use bundled upstream image assets instead of Simple Icons paths', () => {
+  for (const [image, slug] of [['jellyfin/jellyfin', 'jellyfin'], ['tailscale/tailscale', 'tailscale'], ['louislam/uptime-kuma', 'uptimekuma']]) {
+    const icon = iconForImage(image)
+    assert.equal(icon.src, `/icons/${slug}.png`)
+    assert.equal(icon.path, undefined)
+    assert.equal(icon.hex, undefined)
+  }
+})
+
+test('every supported application has a real bundled PNG image', () => {
+  for (const image of ['jellyfin', 'plex', 'homeassistant', 'immich', 'nextcloud', 'traefik', 'grafana', 'prometheus', 'portainer', 'sonarr', 'radarr', 'adguard', 'uptime-kuma', 'qbittorrent', 'nginx', 'tailscale']) {
+    const icon = iconForImage(image)
+    assert.ok(icon, image)
+    const bytes = readFileSync(new URL(`../public${icon.src}`, import.meta.url))
+    assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', image)
+    assert.ok(bytes.readUInt32BE(16) >= 32 && bytes.readUInt32BE(20) >= 32, image)
+  }
+})
 
 test('recognizes a Jellyfin image reference', () => {
   assert.equal(iconForImage('ghcr.io/linuxserver/jellyfin:latest'), siJellyfin)

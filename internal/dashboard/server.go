@@ -16,6 +16,7 @@ import (
 
 	"services/internal/composeupdate"
 	"services/internal/groups"
+	"services/internal/icons"
 	"services/internal/monitor"
 	"services/internal/operations"
 )
@@ -44,6 +45,7 @@ type originAuthority struct {
 }
 
 type Server struct {
+	iconStore            *icons.Store
 	publicationHandler   http.Handler
 	acknowledgeOperation func(context.Context, string) error
 	durable              *operations.Store
@@ -99,6 +101,10 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 		allowed[publicOrigin.host] = struct{}{}
 	}
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
+	s.mux.HandleFunc("GET /api/icons", s.listIcons)
+	s.mux.HandleFunc("PUT /api/icons", s.putIcon)
+	s.mux.HandleFunc("DELETE /api/icons", s.deleteIcon)
+	s.mux.HandleFunc("GET /api/icons/images/{name}", s.iconImage)
 	s.mux.HandleFunc("GET /api/ready", s.ready)
 	s.mux.HandleFunc("GET /api/operations", s.operations)
 	s.mux.HandleFunc("GET /api/operations/{id}", s.operation)
