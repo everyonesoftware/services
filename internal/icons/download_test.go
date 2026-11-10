@@ -26,6 +26,21 @@ func (f resolverFunc) LookupNetIP(c context.Context, _, h string) ([]netip.Addr,
 type transportFunc func(*http.Request) (*http.Response, error)
 
 func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestDownloaderAdvertisesSupportedSVGForContentNegotiation(t *testing.T) {
+	d := newDownloader()
+	data := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24"/></svg>`)
+	d.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.Contains(r.Header.Get("Accept"), "image/svg+xml") {
+			return &http.Response{StatusCode: http.StatusNotAcceptable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("SVG not requested")), Request: r}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/svg+xml"}}, Body: io.NopCloser(bytes.NewReader(data)), Request: r}, nil
+	})
+	out, err := d.Download(context.Background(), "https://example.com/logo")
+	if err != nil || !bytes.Equal(out, data) {
+		t.Fatalf("SVG negotiation: %q %v", out, err)
+	}
+}
+
 func TestDownloaderRejectsUnsafeURLsBeforeTransport(t *testing.T) {
 	d := newDownloader()
 	calls := 0

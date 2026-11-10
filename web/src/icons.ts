@@ -11,8 +11,9 @@ export function imageUrlError(value: string): string {
 
 // Convenience checks only; the server validates the actual image bytes and dimensions.
 export function imageFileError(file: File | null): string {
-  if (!file) return 'Choose a PNG, JPEG or GIF image to upload.'
-  if (!['image/png', 'image/jpeg', 'image/gif'].includes(file.type)) return 'Choose a PNG, JPEG or GIF image. SVG is not supported.'
+  if (!file) return 'Choose a PNG, JPEG, GIF or SVG image to upload.'
+  const untypedSvg = !file.type && /\.svg$/i.test(file.name)
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml'].includes(file.type) && !untypedSvg) return 'Choose a PNG, JPEG, GIF or SVG image.'
   if (file.size > 2 * 1024 * 1024) return 'The image must be 2 MiB or smaller.'
   return ''
 }

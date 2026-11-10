@@ -91,7 +91,7 @@ func (d *downloader) Download(ctx context.Context, raw string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "image/png, image/jpeg, image/gif")
+	req.Header.Set("Accept", "image/png, image/jpeg, image/gif, image/svg+xml")
 	response, err := d.client.Do(req)
 	if err != nil {
 		return nil, err

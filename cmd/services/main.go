@@ -15,12 +15,21 @@ import (
 	"services/internal/dashboard"
 	"services/internal/dockerapi"
 	"services/internal/monitor"
+	"services/internal/svgicon"
 	"services/internal/updates"
 )
 
 var appVersion = "0"
 
 func main() {
+	// Keep the render child separate from version/configuration, storage, Docker,
+	// HTTP listeners and all other application initialization.
+	if len(os.Args) == 2 && os.Args[1] == svgicon.WorkerFlag {
+		if err := svgicon.RunWorker(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	version, err := strconv.Atoi(appVersion)
 	if err != nil || version < 0 {
 		log.Fatalf("invalid build version %q: expected a non-negative integer", appVersion)

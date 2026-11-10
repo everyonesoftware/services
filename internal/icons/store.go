@@ -24,6 +24,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"services/internal/svgicon"
 )
 
 const MaxDownloadBytes = 2 << 20
@@ -206,8 +208,11 @@ func (s *Store) save(ctx context.Context, kind, key, sourceURL string, data []by
 	if err := validateTarget(kind, key); err != nil {
 		return Icon{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	normalized, err := normalize(data)
+	normalized, err := normalize(ctx, data)
 	if err != nil {
+		if ctx.Err() != nil {
+			return Icon{}, ctx.Err()
+		}
 		return Icon{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	if err = ctx.Err(); err != nil {
@@ -316,13 +321,14 @@ func (s *Store) Image(name string) (*os.File, error) {
 	defer root.Close()
 	return root.Open(name)
 }
-func normalize(data []byte) ([]byte, error) {
+func normalize(ctx context.Context, data []byte) ([]byte, error) {
 	if len(data) > MaxDownloadBytes {
 		return nil, errors.New("image exceeds 2 MiB")
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, errors.New("invalid image")
+		// Format is determined from bytes, never the upload MIME type or suffix.
+		return svgicon.Normalize(ctx, data)
 	}
 	if format != "png" && format != "jpeg" && format != "gif" {
 		return nil, errors.New("unsupported image format")

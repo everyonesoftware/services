@@ -2,7 +2,6 @@
 // Uses browser-only API fixtures; does not mutate a real Services server.
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { readFile } from 'node:fs/promises'
 import { createServer } from '../node_modules/vite/dist/node/index.js'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), server: { host: '127.0.0.1', port: 0, hmr: false } })
@@ -35,7 +34,7 @@ await page.route('**/api/**', async route => {
       return route.fulfill({ json: { available, icons } })
     }
     if (writeGate) await writeGate
-    if (failWrite) return route.fulfill({ status: 415, body: 'Only PNG, JPEG and GIF images are supported' })
+    if (failWrite) return route.fulfill({ status: 415, body: 'Unsupported SVG feature. Your displayed icon has been kept.' })
     const target = request.method() === 'PUT' && !upload ? request.postDataJSON() : { kind: url.searchParams.get('kind'), key: url.searchParams.get('key') }
     icons = icons.filter(icon => icon.kind !== target.kind || icon.key !== target.key)
     if (request.method() === 'DELETE') return route.fulfill({ status: 204 })
@@ -113,13 +112,13 @@ try {
   await container.click()
   assert.equal(await page.locator('#icon-url').inputValue(), 'https://example.com/container.gif')
   failWrite = true
-  await page.locator('#icon-url').fill('https://example.com/not-supported.svg')
+  await page.locator('#icon-url').fill('https://example.com/unsupported-features.svg')
   await page.getByRole('button', { name: 'Download & save', exact: true }).click()
-  await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('Only PNG')))
-  assert.equal(await page.locator('#icon-url').inputValue(), 'https://example.com/not-supported.svg')
+  await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('Unsupported SVG feature')))
+  assert.equal(await page.locator('#icon-url').inputValue(), 'https://example.com/unsupported-features.svg')
   assert.equal(await page.locator('.icon-preview img').getAttribute('src'), '/api/icons/images/container.png')
   await page.locator('#icon-url').fill('https://example.com/new.png')
-  assert.match(await page.locator('#icon-error').textContent(), /Only PNG/, 'error persists while editing')
+  assert.match(await page.locator('#icon-error').textContent(), /Unsupported SVG feature/, 'error persists while editing')
   failWrite = false; failReadback = true
   await page.getByRole('button', { name: 'Download & save', exact: true }).click()
   await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('unavailable')))
@@ -151,10 +150,13 @@ try {
   await page.getByRole('button', { name: 'Upload & save', exact: true }).click()
   await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('Choose')))
   const fixture = fileURLToPath(new URL('../public/icons/jellyfin.png', import.meta.url))
-  assert.equal(await page.locator('#icon-file').getAttribute('accept'), 'image/png,image/jpeg,image/gif')
-  await page.locator('#icon-file').setInputFiles({ name: 'bad.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg/>') })
-  await page.getByRole('button', { name: 'Upload & save', exact: true }).click()
-  await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('PNG, JPEG or GIF')))
+  assert.equal(await page.locator('#icon-file').getAttribute('accept'), 'image/png,image/jpeg,image/gif,image/svg+xml,.svg')
+  assert.match(await page.locator('#icon-help').textContent(), /SVGs are validated and converted to PNG; scripts, external resources and unsupported SVG features are rejected/)
+  for (const [name, mimeType] of [['bad.webp', 'image/webp'], ['bad.pdf', 'application/pdf']]) {
+    await page.locator('#icon-file').setInputFiles({ name, mimeType, buffer: Buffer.from('unsupported') })
+    await page.getByRole('button', { name: 'Upload & save', exact: true }).click()
+    await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('PNG, JPEG, GIF or SVG')))
+  }
   await page.locator('#icon-file').setInputFiles({ name: 'huge.png', mimeType: 'image/png', buffer: Buffer.alloc(2 * 1024 * 1024 + 1) })
   await page.getByRole('button', { name: 'Upload & save', exact: true }).click()
   await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('2 MiB')))
@@ -170,7 +172,10 @@ try {
   assert.equal(mutations(), beforeUpload)
   await project.click()
   await page.getByRole('button', { name: 'Upload image', exact: true }).click()
-  await page.locator('#icon-file').setInputFiles(fixture)
+  const svg = { name: 'benign.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#336699"/></svg>') }
+  await page.locator('#icon-file').setInputFiles(svg)
+  assert.equal(mutations(), beforeUpload, 'SVG selection is not an upload')
+  assert.equal(await page.locator('.icon-preview img').getAttribute('src'), '/api/icons/images/project.png', 'never preview raw selected SVG')
   failWrite = true
   if (process.env.ICON_UPLOAD_DESKTOP_SCREENSHOT) {
     await page.setViewportSize({ width: 1200, height: 900 })
@@ -179,13 +184,14 @@ try {
   }
   if (process.env.ICON_UPLOAD_SCREENSHOT) await page.screenshot({ path: process.env.ICON_UPLOAD_SCREENSHOT })
   await page.getByRole('button', { name: 'Upload & save', exact: true }).click()
-  await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('Only PNG')))
-  assert.match(await page.locator('#icon-filename').textContent(), /jellyfin.png/)
+  await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('Unsupported SVG feature')))
+  assert.match(await page.locator('#icon-filename').textContent(), /benign.svg/)
   assert.equal(await page.locator('.icon-preview img').getAttribute('src'), '/api/icons/images/project.png')
+  assert.equal(await project.locator('img').getAttribute('src'), '/api/icons/images/project.png', 'SVG rejection preserves displayed icon')
   failWrite = false; failReadback = true
   await page.getByRole('button', { name: 'Upload & save', exact: true }).click()
   await wait(() => page.locator('#icon-error').textContent().then(text => text.includes('unavailable')))
-  assert.match(await page.locator('#icon-filename').textContent(), /jellyfin.png/)
+  assert.match(await page.locator('#icon-filename').textContent(), /benign.svg/)
   failReadback = false
   writeGate = new Promise(resolve => { releaseWrite = resolve })
   readGate = new Promise(resolve => { releaseRead = resolve })
@@ -196,8 +202,8 @@ try {
   assert.equal(await page.locator('dialog[open]').count(), 1)
   const uploaded = requests.filter(request => request.url.startsWith('/api/icons/upload')).at(-1)
   assert.equal(uploaded.url, '/api/icons/upload?kind=project&key=media')
-  assert.equal(uploaded.contentType, 'image/png')
-  assert.deepEqual(uploaded.body, await readFile(fixture))
+  assert.equal(uploaded.contentType, 'image/svg+xml')
+  assert.deepEqual(uploaded.body, svg.buffer, 'send the original SVG bytes to server validation, not a browser conversion')
   releaseWrite(); writeGate = null
   await wait(() => requests.at(-1)?.method === 'GET')
   assert.equal(await page.locator('dialog[open]').count(), 1)
@@ -241,6 +247,6 @@ try {
   await project.waitFor()
   await wait(() => project.locator('svg[data-brand="stack"]').count().then(n => n === 1))
   assert.deepEqual(errors, [])
-  console.log('PASS: URL and raw-file upload; type/size validation; source switching preserves selection; selection/cancel sends no mutation; uploaded-source reopening; hover-only pencil; independent overrides; native modal/focus/keyboard; busy lock; save/readback gating; failure preservation; reset; 390px fit; disconnected monitoring.')
+  console.log('PASS: URL and raw SVG upload without local SVG preview; WebP/PDF/size rejection; source switching preserves selection; selection/cancel sends no mutation; uploaded-source reopening; hover-only pencil; independent overrides; native modal/focus/keyboard; busy lock; save/readback gating; SVG rejection preserves current icon; reset; 390px fit; disconnected monitoring.')
   console.log(JSON.stringify({ requests: requests.filter(request => request.method !== 'GET').map(request => ({ ...request, body: Buffer.isBuffer(request.body) ? `${request.body.length} raw bytes` : request.body })), mobileBounds: bounds, uploadBounds }))
 } finally { await browser.close(); await server.close() }

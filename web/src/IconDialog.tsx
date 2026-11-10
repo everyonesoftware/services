@@ -60,10 +60,10 @@ export function IconDialog({ target, available, onClose, onSaved }: { target: Ic
         <div hidden={source !== 'url'}><label className="icon-field-label" htmlFor="icon-url">Image URL</label><input ref={input} id="icon-url" className="icon-url" type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="https://example.com/icon.png" autoComplete="off" disabled={!!busy || !available} aria-describedby="icon-help icon-error" aria-invalid={!!failure} /></div>
         <div hidden={source !== 'upload'}>
           <label className="icon-field-label" htmlFor="icon-file">Image file</label>
-          <input ref={fileInput} id="icon-file" className="icon-file" type="file" accept="image/png,image/jpeg,image/gif" onChange={event => setFile(event.target.files?.[0] ?? null)} disabled={!!busy || !available} aria-describedby="icon-filename icon-help icon-error" aria-invalid={!!failure} />
+          <input ref={fileInput} id="icon-file" className="icon-file" type="file" accept="image/png,image/jpeg,image/gif,image/svg+xml,.svg" onChange={event => setFile(event.target.files?.[0] ?? null)} disabled={!!busy || !available} aria-describedby="icon-filename icon-help icon-error" aria-invalid={!!failure} />
           <p id="icon-filename" className="icon-help">{file ? file.name : 'No file selected'}</p>
         </div>
-        <p className="icon-help" id="icon-help">{source === 'url' ? 'Public HTTP(S) PNG, JPEG or GIF.' : 'PNG, JPEG or GIF. The server validates the image bytes.'} Maximum 2 MiB, 4 million pixels and 4096 pixels per side. SVG is not supported.</p>
+        <p className="icon-help" id="icon-help">{source === 'url' ? 'Public HTTP(S) images: ' : ''}PNG, JPEG, GIF or SVG. SVGs are validated and converted to PNG; scripts, external resources and unsupported SVG features are rejected. Maximum 2 MiB, 4 million pixels and 4096 pixels per side.</p>
         <p className="icon-error" id="icon-error" role="alert">{failure || (!available ? 'Icon storage is unavailable. Try again after it reconnects.' : '')}</p>
         <p className="icon-storage"><strong>Saved on your server</strong><br />{source === 'url' ? 'Services downloads and keeps a local copy in its data folder, not loaded from the URL on every visit.' : 'Services keeps a local copy in its data folder. Your file is only uploaded when you save.'}</p>
       </div>

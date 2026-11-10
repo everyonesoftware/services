@@ -64,14 +64,22 @@ test('verified icon mutations refresh before success and reject stale or unavail
   await assert.rejects(icons.changeIcon(target, null, async (_url, options) => options.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({ available: true, icons: [icon] })), /could not be verified/i)
 })
 
-test('file preflight limits selection to PNG, JPEG or GIF up to 2 MiB, not byte validation', async () => {
+test('file preflight accepts SVG MIME or an untyped SVG filename without bypassing unsupported MIME or size checks', async () => {
   const { imageFileError } = await import('./icons.ts')
   assert.match(imageFileError(null), /Choose/)
-  for (const type of ['image/png', 'image/jpeg', 'image/gif']) {
+  for (const type of ['image/png', 'image/jpeg', 'image/gif', 'image/svg+xml']) {
     assert.equal(imageFileError(new File([new Uint8Array(2 * 1024 * 1024)], 'icon', { type })), '')
   }
-  assert.match(imageFileError(new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'large.png', { type: 'image/png' })), /2 MiB/)
-  for (const type of ['', 'image/svg+xml', 'image/webp', 'text/plain']) assert.match(imageFileError(new File(['bytes'], 'icon.png', { type })), /PNG, JPEG or GIF/)
+  for (const name of ['icon.svg', 'ICON.SVG']) assert.equal(imageFileError(new File(['<svg/>'], name)), '')
+  for (const type of ['image/png', 'image/svg+xml', '']) {
+    assert.match(imageFileError(new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'large.svg', { type })), /2 MiB/)
+  }
+  for (const name of ['icon.png', 'icon.svg', 'icon.svg.png']) {
+    for (const type of ['image/webp', 'application/pdf', 'text/plain', 'application/octet-stream']) {
+      assert.match(imageFileError(new File(['bytes'], name, { type })), /PNG, JPEG, GIF or SVG/)
+    }
+  }
+  for (const name of ['icon.png', 'icon.svg.png', 'icon.svgz', 'icon']) assert.match(imageFileError(new File(['bytes'], name)), /PNG, JPEG, GIF or SVG/)
 })
 
 test('image URL validation permits HTTP(S) only without guessing extensions', async () => {
@@ -97,9 +105,10 @@ test('compact native icon dialog has scoped heading, local current preview, URL 
     assert.match(html, /type="url"/)
     assert.match(html, /value="https:\/\/example.com\/icon.png"/)
     assert.match(html, /role="alert"/)
-    assert.match(html, /PNG, JPEG or GIF/)
+    assert.match(html, /PNG, JPEG, GIF or SVG\. SVGs are validated and converted to PNG; scripts, external resources and unsupported SVG features are rejected\./)
+    assert.match(html, /accept="image\/png,image\/jpeg,image\/gif,image\/svg\+xml,\.svg"/)
     assert.match(html, /2 MiB.*4 million pixels.*4096/)
-    assert.match(html, /SVG is not supported/)
+    assert.doesNotMatch(html, /SVG is not supported/)
     assert.match(html, /Download &amp; save/)
     assert.match(html, /Use default icon/)
     assert.match(html, />Cancel</)

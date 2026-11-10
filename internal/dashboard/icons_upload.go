@@ -47,7 +47,7 @@ func (s *Server) uploadIcon(w http.ResponseWriter, r *http.Request) {
 		message := "Unable to save uploaded icon"
 		if errors.Is(err, icons.ErrInvalidInput) {
 			status = http.StatusBadRequest
-			message = "Choose a valid PNG, JPEG or GIF image: maximum 2 MiB, 4 million pixels and 4096 pixels per side"
+			message = "Choose a valid PNG, JPEG, GIF or restricted SVG image: maximum 2 MiB, 4 million pixels and 4096 pixels per side; SVG complexity is limited and output is static PNG up to 512 pixels per side"
 		}
 		if errors.Is(err, icons.ErrUnavailable) {
 			status = http.StatusServiceUnavailable
