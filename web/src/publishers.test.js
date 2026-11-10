@@ -202,6 +202,35 @@ test('every page shell shares Monitor / Publishers / Accounts navigation with on
   }
 })
 
+test('GitHub manifest handoff preserves native POST fields and locks only duplicate submissions', () => {
+  assert.equal(typeof ui.GitHubManifestForm, 'function')
+  for (const destination of ['/settings/apps/new', '/organizations/example/settings/apps/new']) {
+    const manifest = { action: `https://github.com${destination}?state=bound-state`, manifest: JSON.stringify({ name: 'Services "publisher" & café', url: 'https://example.test' }) }
+    const lock = { current: false }
+    const form = ui.GitHubManifestForm({ manifest, lockRef: lock })
+    assert.equal(form.type, 'form')
+    assert.equal(form.props.action, manifest.action)
+    assert.equal(form.props.method, 'post')
+    assert.equal(form.props.disabled, undefined)
+    const input = form.props.children.find(child => child.type === 'input')
+    assert.equal(input.props.type, 'hidden')
+    assert.equal(input.props.name, 'manifest')
+    assert.equal(input.props.value, manifest.manifest)
+    assert.equal(input.props.disabled, undefined)
+    let prevented = 0
+    const event = { preventDefault() { prevented++ } }
+    form.props.onSubmit(event)
+    assert.equal(lock.current, true)
+    assert.equal(prevented, 0, 'first submission must use native browser serialization')
+    form.props.onSubmit(event)
+    assert.equal(prevented, 1, 'duplicate submission must be prevented')
+    lock.current = false // The page-show handler releases the lock after Back.
+    form.props.onSubmit(event)
+    assert.equal(lock.current, true)
+    assert.equal(prevented, 1, 'returning to Services must permit a fresh handoff')
+  }
+})
+
 test('GitHub registration explicitly chooses personal or organization ownership', () => {
   assert.equal(typeof ui.GitHubRegistration, 'function')
   const props = { organization: '', onOwner() {}, onOrganization() {}, onSubmit(event) { event.preventDefault() } }
