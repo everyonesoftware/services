@@ -30,6 +30,12 @@ func main() {
 		}
 		return
 	}
+	if handled, err := runAuthCommand(os.Args[1:], os.Getenv("SERVICES_DATA_DIR"), os.Stdin, os.Stdout); handled {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	version, err := strconv.Atoi(appVersion)
 	if err != nil || version < 0 {
 		log.Fatalf("invalid build version %q: expected a non-negative integer", appVersion)
@@ -69,6 +75,12 @@ func main() {
 		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
 	}
 	handler.SetActionSource(source)
+	authentication, err := configureAuthenticationAt(handler, os.Getenv("SERVICES_DATA_DIR"))
+	if err != nil {
+		// Never expose a network-trusted dashboard if authentication cannot start.
+		log.Fatalf("Authentication startup failed: %v", err)
+	}
+	defer authentication.Close()
 	if err := configureIcons(handler); err != nil {
 		log.Printf("Custom icon editing disabled: %v", err)
 	}
@@ -87,6 +99,8 @@ func main() {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       90 * time.Second,
 	}
 	go func() {
 		<-ctx.Done()

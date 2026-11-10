@@ -2,6 +2,31 @@
 
 A home-server monitoring console for one Docker Engine. Problems are shown first; applications are grouped by Compose project; image updates are always opt-in.
 
+## Accounts and API keys
+
+Services requires an administrator login for the dashboard and management API. On the first start, open the dashboard and create the initial administrator using the local token in `/data/admin-setup-token`. Read that file locally from the mounted data volume; do not put it in chat, GitHub, or logs. The token is generated automatically, survives restarts before setup, and cannot create another first administrator after setup. A later startup removes the obsolete file. No account password or API key needs to be added to Compose or an environment variable. Authentication storage failure prevents the HTTP server from starting rather than exposing an unprotected dashboard.
+
+After login, open **Accounts & API keys** to add/remove administrator accounts, change your password, and create/revoke integration keys. All user accounts in this first version are administrators; API keys have separate, restricted permissions. You cannot delete your own account or the last administrator. Passwords require at least 15 Unicode characters and at most 1024 UTF-8 bytes. Browser sessions expire after 12 hours; logout revokes the current session, and password changes or account deletion invalidate that user's sessions. Cookies are HttpOnly and SameSite=Strict; HTTPS deployments must configure `SERVICES_PUBLIC_ORIGIN` so Secure cookies work behind TLS-terminating proxies. Login/setup requests are rate limited and browser mutations retain same-origin/allowed-host checks.
+
+Login and setup share a limit of ten requests per minute per direct network peer, including malformed requests, with at most four concurrent password-derivation operations. Slow/incomplete request bodies do not reserve those derivation slots; the HTTP server bounds body-read time. Services does not trust `Forwarded`, `X-Forwarded-For`, or `X-Real-IP` for rate limits. Users behind the same reverse proxy (including a Tailscale HTTP proxy) share that proxy's limit. Configure additional per-client throttling at the trusted proxy when needed; do not assume adding forwarding headers gives users independent buckets.
+
+| API-key scope | Allowed access |
+| --- | --- |
+| `services:read` | Read service inventory, monitoring, operation progress, icons, and version. No changes or account/key administration. |
+| `publications:write` | Only `POST /api/images/published`, restricted to the key's explicit untagged lowercase GHCR image repositories. No dashboard reads or container operations. |
+
+API keys are shown only when created; save them directly in your secret manager or GitHub Actions secrets. Optional expiration and immediate revocation are supported. The list shows metadata, not the secret. Set the `Authorization` header to the `Bearer` scheme followed by your API key, and send it over HTTPS from server-side clients; browser Origin/Fetch-Site headers are rejected for API-key requests. Keys cannot create other keys or acquire administrator permissions. A dedicated key per integration makes revocation independent. The public exceptions are the static login page/assets, setup-status endpoint, login/setup submissions, and readiness probe; management data requires a session or a permitted key.
+
+Credentials and session/key hashes are persisted in `/data/auth.db`; password hashes use a unique salt and PBKDF2-HMAC-SHA256 with 600,000 iterations. Treat the database, any SQLite sidecar files, and backups as sensitive. Keep the persistent data volume when replacing/updating Services, and use stopped-copy or SQLite-aware backups. Deleting `auth.db` is not a supported password-reset procedure. Local operator recovery is available without opening the HTTP API:
+
+```sh
+# Supply the new password through standard input, not a command-line argument.
+# Run locally with a trusted input source; never commit a password file.
+services auth reset-password --username admin --password-stdin
+```
+
+In Docker, use the existing container's `/app/services` executable via `docker exec -i` with password input piped from your local secret source. Recovery requires local access to the existing data volume, invalidates the account's sessions, and does not start a listener or perform Docker operations. This first version does not include email recovery, MFA, OAuth login, or automated GitHub/Tailscale registration.
+
 ## Monitoring
 
 Monitoring runs on the server, not in a browser tab. The dashboard shows active incidents, container diagnostics, and recent changes.
@@ -34,7 +59,7 @@ SVG imports are parsed using strict element and attribute allowlists, then rende
 
 SVG complexity is bounded to 512 elements, depth 16, 24 attributes per element, 64 KiB total path data, and 8192 path/point tokens, with additional numeric and cumulative-transform limits. Rendering uses at most two child processes, with a three-second queue/execution deadline and bounded PNG output. Both the parent and child validate the input; the byte-stream renderer has no accepted external-resource loading path. The subprocess is a timeout/isolation boundary, not an operating-system filesystem/network sandbox or a guarantee that arbitrary SVG is harmless. Rejected imports preserve the existing saved icon.
 
-Custom icon editing requires an explicitly configured absolute, writable persistent `SERVICES_DATA_DIR`. If storage cannot be initialized, editing is disabled without disabling monitoring. If a metadata write cannot be confirmed durable, editing is disabled until Services restarts and reloads the visible metadata; a failed request is not proof that no disk change occurred. Resolve storage errors before restarting or retrying. Keep the entire icons subfolder with your data backup. Like existing dashboard actions, icon mutations use the configured Origin/Host checks and rely on your trusted network or authenticated proxy for access control; they do not add a login system.
+Custom icon editing requires an explicitly configured absolute, writable persistent `SERVICES_DATA_DIR`. If storage cannot be initialized, editing is disabled without disabling monitoring. If a metadata write cannot be confirmed durable, editing is disabled until Services restarts and reloads the visible metadata; a failed request is not proof that no disk change occurred. Resolve storage errors before restarting or retrying. Keep the entire icons subfolder with your data backup. Icon mutations require an administrator session and matching Origin/Host checks; read-only and publisher keys cannot edit icons.
 
 ### Notifications
 
@@ -64,7 +89,7 @@ GitHub Actions can announce an image immediately after a successful GHCR push us
 
 The notification supplies the published repository, actual tags, root manifest/index digest, version, source repository, commit, Git ref, workflow run and attempt, workflow URL, and UTC publication time. Services compares that digest with the running image's local repository digest for the exact repository **and tag**. A notification for `:main` does not change an application tracking `:latest`; pinned images remain pinned. Missing local repository digests remain unknown rather than implying an update. Notification ingestion and immediate dashboard display do not query GHCR. The existing background checks and **Check for updates** remain reconciliation paths, and a manually confirmed installation still checks/pulls from the registry.
 
-Configure `SERVICES_PUBLISH_TOKEN` with a high-entropy secret of at least 32 printable non-space ASCII characters (maximum 512), and `SERVICES_PUBLISH_REPOSITORIES` with a comma-separated list of exact untagged lowercase repositories, for example `ghcr.io/everyonesoftware/services`. Wildcards and tag suffixes are rejected. Both settings are required to enable the endpoint; neither is enabled by default. Store the same token in the publishing repository's GitHub Actions secret, never in committed files or workflow output. The credential authorizes notifications for its allowlist only; it does not grant dashboard or container-action permissions. This first implementation uses one notification credential per Services installation.
+Create an API key in **Accounts & API keys** with `publications:write` and an explicit image-repository allowlist, for example `ghcr.io/everyonesoftware/services`. Wildcards and tag suffixes are rejected. Save that key in the publishing repository's `SERVICES_PUBLISH_TOKEN` Actions secret, never in committed files or workflow output. The receiver is initialized automatically when verified persistent publication storage is available; no Services-side `SERVICES_PUBLISH_*` environment settings are needed for managed keys. Existing installations may retain the legacy `SERVICES_PUBLISH_TOKEN` (32–512 printable non-space ASCII characters) and `SERVICES_PUBLISH_REPOSITORIES` pair for migration. A legacy token remains notification-only and cannot authenticate dashboard or management routes.
 
 Keep the endpoint behind Tailscale ACLs or an authenticated trusted private proxy. It requires an allowed request hostname (the configured public origin is automatically allowed), a bearer token, unencoded `application/json`, and at most 64 KiB. Browser `Origin` and `Sec-Fetch-Site` headers are rejected; existing browser-action origin protections remain unchanged. The Services environment requires `/data` on a verified writable persistent named volume or local bind. Configuration/storage failure disables notifications without disabling monitoring. Worker containers do not inherit the notification credential.
 
@@ -74,8 +99,8 @@ Accepted publication metadata is committed to a separate `/data/publications.db`
 
 The included workflow captures metadata immediately after `docker/build-push-action` succeeds, using its digest output and the actual Docker metadata tag list. It saves the original payload as an artifact for 30 days. A separate, opt-in job downloads that payload, joins the private tailnet, and sends it. The publish job remains successful if notification delivery fails; the notification job and its failure-report job make the delivery failure visible. **Re-run failed jobs**, not all jobs, to resend without rebuilding or republishing. Missing/expired artifacts fail closed rather than manufacturing a new publication timestamp.
 
-1. Deploy this version of Services with the persistent data mount and both `SERVICES_PUBLISH_*` environment settings above. Existing deployments must add those environment entries to their own Compose file; the supplied `compose.yaml` includes them. Keep the workflow notification variable disabled until the receiver is deployed.
-2. In Tailscale, create a dedicated CI tag and federated OIDC identity with **Auth Keys > Write** (`auth_keys`) and permission to use that tag. Restrict the identity's GitHub trust to the intended repository and publishing refs. For notification-only network access, expose a private proxy listener that forwards **only** `POST /api/images/published`, rejects every other method/path, and allow the CI tag only to that listener's port. Do not grant CI general access to the home server or dashboard port. Tailscale ACLs restrict network destinations/ports, not HTTP paths. See the official [Tailscale GitHub Action setup](https://tailscale.com/docs/integrations/github/github-action).
+1. Deploy this version of Services with the persistent data mount, complete administrator setup, and create a repository-scoped `publications:write` key. Keep the workflow notification variable disabled until the receiver is deployed.
+2. In Tailscale, create a dedicated CI tag and federated OIDC identity with **Auth Keys > Write** (`auth_keys`) and permission to use that tag. Restrict the identity's GitHub trust to the intended repository and publishing refs. Allow the CI tag to reach Services' existing HTTPS endpoint, not other home-server destinations. Application authorization restricts the publisher to ingestion even though it can reach the same listener. No notification-only listener or additional Docker port is required. See the official [Tailscale GitHub Action setup](https://tailscale.com/docs/integrations/github/github-action).
 3. Set these **GitHub repository variables**:
 
    | Variable | Value |
@@ -86,14 +111,14 @@ The included workflow captures metadata immediately after `docker/build-push-act
    | `TAILSCALE_TAGS` | Authorized comma-separated CI tag(s), e.g. `tag:services-publisher`. |
    | `SERVICES_PUBLISH_NOTIFICATIONS` | Set to the literal `true` only after the receiver and tailnet permissions are ready. |
 
-4. Set the **GitHub Actions secret** `SERVICES_PUBLISH_TOKEN` to the same notification-only secret configured on Services. Do not put the secret in repository variables.
+4. Set the **GitHub Actions secret** `SERVICES_PUBLISH_TOKEN` to the newly created publisher API key. Do not put the secret in repository variables.
 5. After the next successful publish, confirm the notification job reports an acknowledged result. A matching running application's update status appears on the next dashboard services poll (normally within 30 seconds); open **Review update** to see publication version/time, commit, and workflow links. Installation still needs confirmation.
 
-**Network trust matters:** Services' existing dashboard action routes do not have built-in login authentication. Their Origin/Host checks are browser-CSRF defenses, not authorization against a server-side client that can supply its own headers. The notification token does not grant those routes access, but direct CI access to the dashboard listener would still trust that runner as a dashboard network client. A notification-only proxy listener and destination-port ACL are required if the runner must not have that pre-existing dashboard capability. Add the proxy's forwarded hostname to `SERVICES_ALLOWED_HOSTS` as necessary, and use its HTTPS URL (including a dedicated port if used) for `SERVICES_PUBLISH_URL`.
+**Network and application trust are separate:** Tailscale restricts network reachability; Services independently authenticates and authorizes API requests. A publisher API key cannot read monitoring data or perform container/admin operations, even with a forged browser Origin header. Retain Tailscale ACLs and HTTPS as defense in depth. Add the request hostname to `SERVICES_ALLOWED_HOSTS` if it is not already allowed through the configured public origin.
 
 The sender is dependency-free Node 24: `node scripts/publish-notification.mjs capture` creates the artifact once; `node scripts/publish-notification.mjs send` sends the file at `SERVICES_PUBLISH_PAYLOAD_PATH`. Capture uses `PUBLISHED_DIGEST`, newline-separated fully qualified `PUBLISHED_TAGS`, the positive integer `APP_VERSION`, and GitHub's repository/SHA/ref/run/attempt environment. The image name may differ from the source repository name. The send command requires `SERVICES_PUBLISH_URL` and `SERVICES_PUBLISH_TOKEN`. It serializes once and makes at most four attempts, with a ten-second timeout per request and exponential delays. It retries transient network failures and HTTP 408/429/5xx, does not follow redirects, and never logs credentials or untrusted response bodies.
 
-To enable another application, add its exact image repository to Services' allowlist and add the same capture/artifact/notification lifecycle to that application's publish workflow. Supply that workflow's actual tags, root digest, and version; do not infer them from a current GHCR lookup or assume the image name equals the GitHub repository. Only the Services repository's workflow is wired here; other repositories are not modified.
+To enable another application, create a separate publisher key scoped to its exact image repository and add the same capture/artifact/notification lifecycle to that application's publish workflow. Supply that workflow's actual tags, root digest, and version; do not infer them from a current GHCR lookup or assume the image name equals the GitHub repository. Only the Services repository's workflow is wired here; other repositories are not modified.
 
 The workflow serializes non-PR publish-and-notify runs in a shared concurrency group, with no cancellation of running work and up to 100 queued runs (`queue: max`). Overflow runs are canceled; ordering is by entry into the concurrency queue, not guaranteed commit or dispatch order. PRs use separate groups. Other publishers must use equivalent serialization for shared mutable tags. Background/manual checks remain necessary reconciliation for external tag changes, missed delivery, clock skew, or unavailable Services. See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 
@@ -217,8 +242,8 @@ Configure these environment variables (for example in a local `.env` file):
 | `SERVICES_ALLOWED_HOSTS` | Additional exact hostnames allowed to perform actions, comma separated. Add your LAN hostname/IP if needed. |
 | `SERVICES_PUBLIC_ORIGIN` | Exact browser origin when using a TLS-terminating proxy, e.g. `https://services.example.net` (no trailing slash). |
 | `SERVICES_WEBHOOK_URL` | Optional generic JSON notification receiver. |
-| `SERVICES_PUBLISH_TOKEN` | Optional notification-only bearer secret, 32–512 printable non-space ASCII characters. Requires an explicit repository allowlist. |
-| `SERVICES_PUBLISH_REPOSITORIES` | Exact untagged GHCR repositories allowed to submit publication metadata, comma separated. No wildcards. |
+| `SERVICES_PUBLISH_TOKEN` | Optional legacy notification-only bearer secret, 32–512 printable non-space ASCII characters. Managed API keys do not require this setting. |
+| `SERVICES_PUBLISH_REPOSITORIES` | Allowlist for the legacy notification token only: exact untagged GHCR repositories, comma separated. No wildcards. |
 | `SERVICES_PROJECT_NAME` | Services' own Compose project name; defaults to `services`. |
 | `SERVICES_DATA_DIR` | Must be `/data` backed by a writable named volume or local host-folder bind. Named volumes use the image directory's initial ownership; a host folder needs compatible permissions of its own. |
 | `SERVICES_SERVICE_NAME` | Optional Services Compose service identity; defaults to `services`. Configure custom deployments explicitly. |
@@ -230,7 +255,7 @@ For Linux, override the two roots with your real application root and adjust the
 
 ### Security boundary
 
-There is no built-in login. Keep Services behind Tailnet ACLs or an authenticated trusted proxy; do not expose port 8080 to the public internet. Mutation endpoints require a matching browser Origin and an allowed request hostname. Loopback and Tailnet IPs are allowed by default. These checks are not a replacement for authentication.
+The dashboard requires an administrator session, and API keys have explicit route/repository permissions. Keep Services behind Tailnet ACLs or a trusted private proxy; authentication is not a recommendation to expose Docker management publicly. Browser mutations additionally require a matching Origin and an allowed request hostname. Loopback and Tailnet IPs are allowed by default. These CSRF/Host checks supplement, rather than replace, authentication. Existing network-only deployments will require administrator setup after upgrading; there is no anonymous-management compatibility mode in production.
 
 **Docker socket access is effectively host-control access.** A read-only socket bind does not make API calls read-only. The application must be able to pull images and recreate containers. Anyone compromising Services could control Docker.
 

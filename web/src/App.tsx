@@ -50,7 +50,8 @@ function usePolling<T>(url: string, interval: number, paused = false) {
   return { data, error, loading, refresh, replace }
 }
 
-export default function App() {
+type AppProps = { user?: { username: string }; onAccounts?: () => void; onLogout?: () => void }
+export default function App({ user, onAccounts, onLogout }: AppProps = {}) {
   const [iconTarget, setIconTarget] = useState<IconEditorTarget | null>(null)
   // Pause only icon polling during editing so an older response cannot overwrite a verified mutation.
   const iconsRequest = usePolling<IconList>('/api/icons', 30_000, iconTarget !== null)
@@ -97,7 +98,7 @@ export default function App() {
 
   return <>
     <a className="skip-link" href="#services">Skip to services</a>
-    <header className="app-header"><a className="brand" href="/" aria-label="Services home"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>services<span className="brand-divider" /> <span className="product-label">Engine monitor</span></a><span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span></header>
+    <header className="app-header"><a className="brand" href="/" aria-label="Services home"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>services<span className="brand-divider" /> <span className="product-label">Engine monitor</span></a><div className="auth-nav"><span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>{user && <span className="auth-username">{user.username}</span>}{onAccounts && <button className="button secondary" onClick={onAccounts}>Accounts</button>}{onLogout && <button className="button secondary" onClick={onLogout}>Sign out</button>}</div></header>
     <main className="workspace">
       <section className="page-heading"><h1>Monitor</h1><div className="heading-actions"><button className="button secondary" onClick={refresh} type="button">↻ <span>Refresh</span></button><button className="button primary" onClick={() => void check()} disabled={checking || !connected} type="button">{checking ? 'Checking images…' : 'Check for updates'}</button></div></section>
       {notice && <p role={notice.error ? 'alert' : 'status'} className={`notice ${notice.error ? 'danger' : ''}`}>{notice.text}</p>}

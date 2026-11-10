@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"services/internal/auth"
 	"services/internal/composeupdate"
 	"services/internal/groups"
 	"services/internal/icons"
@@ -45,6 +47,12 @@ type originAuthority struct {
 }
 
 type Server struct {
+	authRequired         bool
+	authStore            *auth.Store
+	setupTokenHash       [sha256.Size]byte
+	setupTokenPresent    bool
+	authAttempts         *loginAttempts
+	publicationLegacy    bool
 	iconStore            *icons.Store
 	publicationHandler   http.Handler
 	acknowledgeOperation func(context.Context, string) error
@@ -133,6 +141,14 @@ func (s *Server) actionContainers() ([]groups.Container, error) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "same-origin")
+	w.Header().Set("X-Frame-Options", "DENY")
+	var ok bool
+	r, ok = s.authorize(w, r)
+	if !ok {
+		return
+	}
 	s.mux.ServeHTTP(w, r)
 }
 

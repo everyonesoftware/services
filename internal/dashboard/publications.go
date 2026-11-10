@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"services/internal/auth"
 	"services/internal/groups"
 	"services/internal/updates"
 )
@@ -29,6 +30,7 @@ var publicationRepository = regexp.MustCompile(`^ghcr\.io/[a-z0-9]+(?:(?:[._]|__
 // Invalid configuration leaves the endpoint disabled, including on reconfiguration.
 func (s *Server) ConfigurePublicationNotifications(token string, repositories []string, receiver PublicationReceiver) error {
 	s.publicationHandler = nil
+	s.publicationLegacy = false
 	if len(token) < 32 || len(token) > 512 || strings.IndexFunc(token, func(r rune) bool { return r < 33 || r > 126 }) >= 0 {
 		return errors.New("publication token must contain 32 to 512 printable non-space ASCII characters")
 	}
@@ -42,18 +44,45 @@ func (s *Server) ConfigurePublicationNotifications(token string, repositories []
 		}
 		allowed[repository] = struct{}{}
 	}
+	s.publicationHandler = s.newPublicationHandler(token, allowed, receiver)
+	s.publicationLegacy = true
+	return nil
+}
+
+// ConfigurePublicationReceiver enables ingestion using managed API keys. Each key
+// supplies its own repository allowlist; no environment credential is required.
+func (s *Server) ConfigurePublicationReceiver(receiver PublicationReceiver) error {
+	s.publicationHandler = nil
+	s.publicationLegacy = false
+	if !s.AuthenticationConfigured() || receiver == nil {
+		return errors.New("managed publication notifications require authentication and a receiver")
+	}
+	s.publicationHandler = s.newPublicationHandler("", nil, receiver)
+	return nil
+}
+
+func (s *Server) newPublicationHandler(token string, legacyAllowed map[string]struct{}, receiver PublicationReceiver) http.Handler {
 	expected := sha256.Sum256([]byte(token))
-	s.publicationHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		credentials := r.Header.Values("Authorization")
-		if len(credentials) != 1 || !strings.HasPrefix(credentials[0], "Bearer ") {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="image-publication"`)
-			http.Error(w, "Notification credential required", http.StatusUnauthorized)
-			return
-		}
-		actual := sha256.Sum256([]byte(strings.TrimPrefix(credentials[0], "Bearer ")))
-		if subtle.ConstantTimeCompare(actual[:], expected[:]) != 1 {
-			http.Error(w, "Invalid notification credential", http.StatusUnauthorized)
-			return
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allowed := legacyAllowed
+		key, managed := r.Context().Value(authKeyContext{}).(auth.APIKey)
+		if managed {
+			allowed = make(map[string]struct{}, len(key.Repositories))
+			for _, repository := range key.Repositories {
+				allowed[repository] = struct{}{}
+			}
+		} else {
+			credentials := r.Header.Values("Authorization")
+			if token == "" || len(credentials) != 1 || !strings.HasPrefix(credentials[0], "Bearer ") {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="image-publication"`)
+				http.Error(w, "Notification credential required", http.StatusUnauthorized)
+				return
+			}
+			actual := sha256.Sum256([]byte(strings.TrimPrefix(credentials[0], "Bearer ")))
+			if subtle.ConstantTimeCompare(actual[:], expected[:]) != 1 {
+				http.Error(w, "Invalid notification credential", http.StatusUnauthorized)
+				return
+			}
 		}
 		host, _, validHost := normalizedAuthority(r.Host, "http")
 		if !validHost || !s.allowedOriginHost(host) || len(r.Header.Values("Origin")) != 0 || len(r.Header.Values("Sec-Fetch-Site")) != 0 {
@@ -115,7 +144,6 @@ func (s *Server) ConfigurePublicationNotifications(token string, repositories []
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = fmt.Fprintf(w, "{\"result\":%q}\n", result)
 	})
-	return nil
 }
 
 func (s *Server) imagePublished(w http.ResponseWriter, r *http.Request) {

@@ -18,10 +18,10 @@ import (
 func configurePublications(handler *dashboard.Server, checker *updates.Checker) (*updates.PublicationStore, error) {
 	token := os.Getenv("SERVICES_PUBLISH_TOKEN")
 	repositories := os.Getenv("SERVICES_PUBLISH_REPOSITORIES")
-	if token == "" && repositories == "" {
+	if token == "" && repositories == "" && !handler.AuthenticationConfigured() {
 		return nil, nil
 	}
-	if token == "" || repositories == "" {
+	if (token == "") != (repositories == "") {
 		return nil, errors.New("both SERVICES_PUBLISH_TOKEN and SERVICES_PUBLISH_REPOSITORIES are required")
 	}
 	if os.Getenv("SERVICES_DATA_DIR") != "/data" {
@@ -38,7 +38,10 @@ func configurePublications(handler *dashboard.Server, checker *updates.Checker) 
 	if _, err := operations.ResolveDataMount(inspected); err != nil {
 		return nil, fmt.Errorf("verify publication storage: %w", err)
 	}
-	allowed := strings.Split(repositories, ",")
+	var allowed []string
+	if repositories != "" {
+		allowed = strings.Split(repositories, ",")
+	}
 	for i := range allowed {
 		allowed[i] = strings.TrimSpace(allowed[i])
 	}
@@ -50,7 +53,12 @@ func configurePublicationsAt(handler *dashboard.Server, checker *updates.Checker
 	if err != nil {
 		return nil, err
 	}
-	if err = handler.ConfigurePublicationNotifications(token, repositories, checker); err != nil {
+	if token == "" && len(repositories) == 0 {
+		err = handler.ConfigurePublicationReceiver(checker)
+	} else {
+		err = handler.ConfigurePublicationNotifications(token, repositories, checker)
+	}
+	if err != nil {
 		store.Close()
 		return nil, err
 	}
