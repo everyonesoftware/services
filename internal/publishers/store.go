@@ -115,9 +115,9 @@ func Open(directory string) (*Store, error) {
 	if err := checkStorageDirectories(directory); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(directory, 0700); err != nil {
-		return nil, err
-	}
+	// The data mount is operator-owned and shared with other Services stores.
+	// A group-writable bind may permit file creation but not chmod. MkdirAll
+	// protects newly created directories; preserve existing mount permissions.
 	// Persist every newly created directory entry, not just the leaf. Unchanged
 	// ancestors need only traversal permission, not permission to open for fsync.
 	for _, path := range createdDirectories {

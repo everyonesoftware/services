@@ -64,7 +64,7 @@ func TestStorageRejectsSymlinkPaths(t *testing.T) {
 	}
 }
 
-func TestStorageRestrictsPermissions(t *testing.T) {
+func TestStoragePreservesExistingDirectoryAndRestrictsPrivateFiles(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permissions")
 	}
@@ -80,7 +80,14 @@ func TestStorageRestrictsPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, path := range []string{dir, filepath.Join(dir, "publishers.key"), filepath.Join(dir, "publishers.db")} {
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0777 {
+		t.Fatal("operator-managed directory permissions were changed")
+	}
+	for _, path := range []string{filepath.Join(dir, "publishers.key"), filepath.Join(dir, "publishers.db")} {
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Fatal(err)
