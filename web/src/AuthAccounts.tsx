@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { authRequest } from './authApi.ts'
+import { AppNavigation } from './Publishers.tsx'
 import type { ApiKey, AuthUser } from './authApi.ts'
 
 import { canDeleteUser, keyPayload } from './authAccountModel.ts'
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed. Please try again.'
 const dateLabel = (value?: string) => value ? new Date(value).toLocaleString() : 'Never'
 
-type Props = { user: AuthUser; onBack: () => void; onLogout: () => void; onPasswordChanged: () => void }
-export function AuthAccounts({ user, onBack, onLogout, onPasswordChanged }: Props) {
+type Props = { user: AuthUser; onBack: () => void; onPublishers?: () => void; onLogout: () => void; onPasswordChanged: () => void }
+export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordChanged }: Props) {
   const [users, setUsers] = useState<AuthUser[]>([])
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -62,7 +63,7 @@ export function AuthAccounts({ user, onBack, onLogout, onPasswordChanged }: Prop
       await load()
     })
   }
-  return <><header className="app-header auth-header"><a className="brand" href="/">services</a><div className="auth-nav"><span className="auth-username">{user.username}</span><button className="button secondary" onClick={onBack}>Monitor</button><button className="button secondary" onClick={onLogout} disabled={busy}>Sign out</button></div></header>
+  return <><header className="app-header auth-header"><a className="brand" href="/">services</a><div className="auth-nav"><span className="auth-username">{user.username}</span><AppNavigation active="accounts" onMonitor={onBack} onPublishers={onPublishers} disabled={busy} /><button className="button secondary" onClick={onLogout} disabled={busy}>Sign out</button></div></header>
     <main className="workspace accounts-workspace"><section className="page-heading"><h1>Accounts &amp; API keys</h1><button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button></section>
     {error && <p role="alert" className="notice danger">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
     <div className="accounts-grid"><section className="auth-card" aria-labelledby="admins-title"><h2 id="admins-title">Administrators</h2><p className="auth-help">All administrator accounts have full access. Your current account and the last administrator cannot be deleted.</p>

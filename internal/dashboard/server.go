@@ -47,27 +47,29 @@ type originAuthority struct {
 }
 
 type Server struct {
-	authRequired         bool
-	authStore            *auth.Store
-	setupTokenHash       [sha256.Size]byte
-	setupTokenPresent    bool
-	authAttempts         *loginAttempts
-	publicationLegacy    bool
-	iconStore            *icons.Store
-	publicationHandler   http.Handler
-	acknowledgeOperation func(context.Context, string) error
-	durable              *operations.Store
-	durableProduction    bool
-	durableProject       string
-	mutationError        error
-	source               ContainerSource
-	actionSource         ContainerSource
-	updates              UpdateApplier
-	updater              ServiceUpdater
-	allowedHosts         map[string]struct{}
-	publicOrigin         *originAuthority
-	version              int
-	mux                  *http.ServeMux
+	publishers                      *publisherIntegration
+	publisherConfigurationAttempted bool
+	authRequired                    bool
+	authStore                       *auth.Store
+	setupTokenHash                  [sha256.Size]byte
+	setupTokenPresent               bool
+	authAttempts                    *loginAttempts
+	publicationLegacy               bool
+	iconStore                       *icons.Store
+	publicationHandler              http.Handler
+	acknowledgeOperation            func(context.Context, string) error
+	durable                         *operations.Store
+	durableProduction               bool
+	durableProject                  string
+	mutationError                   error
+	source                          ContainerSource
+	actionSource                    ContainerSource
+	updates                         UpdateApplier
+	updater                         ServiceUpdater
+	allowedHosts                    map[string]struct{}
+	publicOrigin                    *originAuthority
+	version                         int
+	mux                             *http.ServeMux
 }
 
 func New(source ContainerSource, version int) *Server {
@@ -109,6 +111,7 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 		allowed[publicOrigin.host] = struct{}{}
 	}
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
+	s.registerPublisherRoutes()
 	s.mux.HandleFunc("GET /api/icons", s.listIcons)
 	s.mux.HandleFunc("PUT /api/icons", s.putIcon)
 	s.mux.HandleFunc("PUT /api/icons/upload", s.uploadIcon)

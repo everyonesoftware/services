@@ -31,8 +31,9 @@ export function validatePayload(payload) {
   check(Object.keys(payload).length === fields.length && fields.every(key => Object.hasOwn(payload, key)), 'payload fields');
   const matches = (field, pattern) => check(typeof payload[field] === 'string' && pattern.test(payload[field]), field);
   check(payload.schemaVersion === 1, 'schemaVersion');
-  matches('repository', /^ghcr\.io\/[a-z0-9]+(?:[._-][a-z0-9]+)*\/[a-z0-9]+(?:[._-][a-z0-9]+)*$/);
-  check(Array.isArray(payload.tags) && payload.tags.length > 0 && payload.tags.every(tag => typeof tag === 'string' && /^[\w][\w.-]{0,127}$/.test(tag)) && new Set(payload.tags).size === payload.tags.length, 'tags');
+  matches('repository', /^ghcr\.io\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+$/);
+  check(payload.repository.length <= 255, 'repository');
+  check(Array.isArray(payload.tags) && payload.tags.length > 0 && payload.tags.length <= 64 && payload.tags.every(tag => typeof tag === 'string' && /^[\w][\w.-]{0,127}$/.test(tag)) && new Set(payload.tags).size === payload.tags.length, 'tags');
   matches('digest', /^sha256:[a-f0-9]{64}$/);
   matches('version', /^[1-9]\d*$/);
   matches('sourceRepository', /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/);

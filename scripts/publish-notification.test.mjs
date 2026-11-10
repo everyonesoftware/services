@@ -57,6 +57,16 @@ test('supports an image name different from its GitHub source repository', () =>
   assert.deepEqual(custom.tags, ['latest', '42']);
 });
 
+test('publisher capture accepts the exact GHCR repositories supported by managed keys', () => {
+  for (const repository of ['ghcr.io/example/my__app', 'ghcr.io/example/my--app', 'ghcr.io/example/nested/app']) {
+    assert.equal(createPayload({ ...env(), PUBLISHED_TAGS: `${repository}:latest` }, publishedAt).repository, repository);
+  }
+  for (const repository of ['ghcr.io/example/bad___app', 'ghcr.io/example/' + 'a'.repeat(256)]) {
+    assert.throws(() => createPayload({ ...env(), PUBLISHED_TAGS: `${repository}:latest` }, publishedAt));
+  }
+  assert.throws(() => createPayload({ ...env(), PUBLISHED_TAGS: Array.from({ length: 65 }, (_, i) => `ghcr.io/example/app:tag-${i}`).join('\n') }, publishedAt));
+});
+
 test('POSTs bearer-authenticated JSON and acknowledges accepted, duplicate and stale', async t => {
   for (const result of ['accepted', 'duplicate', 'stale']) {
     let received;

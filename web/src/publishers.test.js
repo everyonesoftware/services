@@ -1,0 +1,355 @@
+import test, { after } from 'node:test'
+import assert from 'node:assert/strict'
+import { createServer } from 'vite'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom' })
+after(() => server.close())
+const api = await server.ssrLoadModule('/src/publisherApi.ts').catch(() => ({}))
+const ui = await server.ssrLoadModule('/src/Publishers.tsx').catch(() => ({}))
+const repository = { id: 14, fullName: 'Acme/Website', defaultBranch: 'main', installationId: 8 }
+
+test('every publisher API operation supplies an abortable bounded request', async () => {
+  const signals = []
+  const client = api.createPublisherApi(async (_url, options) => { signals.push(options.signal); return Response.json({}) })
+  await client.repositories()
+  await client.workflow(repository, 'ghcr.io/acme/custom', 'review')
+  await client.rotate('saved')
+  await client.status()
+  assert.ok(signals.every(signal => signal instanceof AbortSignal))
+})
+
+test('publisher deadlines bound stalled fetch and body and identify uncertain mutations', { timeout: 1000 }, async () => {
+  const stalled = () => new Promise(() => {})
+  for (const fetcher of [stalled, async () => ({ ok: true, json: stalled })]) {
+    const client = api.createPublisherApi(fetcher, { timeoutMs: 15 })
+    await assert.rejects(client.repositories(), error => error.name === 'PublisherRequestTimeout' && !error.mutation)
+    await assert.rejects(client.rotate('saved'), error => error.name === 'PublisherRequestTimeout' && error.mutation && /may have applied/.test(error.message))
+  }
+})
+
+test('publisher caller cancellation settles even if transport ignores its abort signal', { timeout: 1000 }, async () => {
+  const caller = new AbortController()
+  const client = api.createPublisherApi(() => new Promise(() => {}), { timeoutMs: 200 })
+  const pending = client.status(caller.signal)
+  caller.abort()
+  await assert.rejects(pending, error => error.name === 'AbortError')
+})
+
+test('uncertain mutation timeouts refresh saved state once without claiming rollback or hiding errors', async () => {
+  const calls = [], statuses = []
+  const client = { status: async () => { calls.push('status'); return { connections: [{ state: 'awaiting_callback' }] } } }
+  const timeout = new api.PublisherRequestTimeout('POST')
+  await api.refreshAfterPublisherTimeout(timeout, client, value => statuses.push(value))
+  await api.refreshAfterPublisherTimeout(timeout, client, value => statuses.push(value))
+  await api.refreshAfterPublisherTimeout(new api.PublisherRequestTimeout('GET'), client, () => {})
+  assert.deepEqual(calls, ['status'])
+  assert.equal(statuses[0].connections[0].state, 'awaiting_callback')
+  const failed = new api.PublisherRequestTimeout('POST')
+  await api.refreshAfterPublisherTimeout(failed, { status: async () => { throw new Error('Offline') } }, () => {})
+  assert.equal(failed.stateRefreshed, false)
+  assert.match(failed.message, /may have applied/)
+})
+
+test('workflow and lifecycle API operations preserve exact payloads and encoded connection IDs', async () => {
+  const calls = []
+  const client = api.createPublisherApi(async (url, options) => { calls.push({ url, ...options }); return Response.json({}) })
+  await client.workflow(repository, 'ghcr.io/acme/custom', 'review-fingerprint')
+  await client.disconnect('saved/key')
+  await client.rotate('saved/key')
+  await client.recover('saved/key')
+  assert.deepEqual(calls.map(call => [call.url, call.method, JSON.parse(call.body)]), [
+    ['/api/publishers/workflow', 'POST', { repository, imageRepository: 'ghcr.io/acme/custom', fingerprint: 'review-fingerprint' }],
+    ['/api/publishers/saved%2Fkey/disconnect', 'POST', {}],
+    ['/api/publishers/saved%2Fkey/rotate', 'POST', {}],
+    ['/api/publishers/saved%2Fkey/recover', 'POST', {}],
+  ])
+})
+
+test('Apply sends the reviewed configuration approval unchanged and omits it for legacy plans', async () => {
+  const bodies = []
+  const client = api.createPublisherApi(async (_url, options) => { bodies.push(JSON.parse(options.body)); return Response.json({}) })
+  const approval = 'a'.repeat(64)
+  await client.apply(repository, 'ghcr.io/acme/custom', approval)
+  await client.apply(repository, 'ghcr.io/acme/custom')
+  assert.deepEqual(bodies, [{ repository, imageRepository: 'ghcr.io/acme/custom', approval }, { repository, imageRepository: 'ghcr.io/acme/custom' }])
+})
+
+test('Apply always reads saved status after a partial failure and preserves the original failure', async () => {
+  const calls = []
+  const plan = { repository, imageRepository: 'ghcr.io/acme/custom', approval: 'b'.repeat(64) }
+  const failure = new Error('Configuration saved; dispatch failed')
+  const saved = { connections: [{ id: 'partial', state: 'error' }] }
+  const client = { apply: async (...args) => { calls.push(['apply', ...args]); throw failure }, status: async () => { calls.push(['status']); return saved } }
+  const statuses = []
+  await assert.rejects(api.applyAndRefresh(client, plan, status => statuses.push(status)), error => error === failure)
+  assert.deepEqual(calls, [['apply', repository, plan.imageRepository, plan.approval], ['status']])
+  assert.deepEqual(statuses, [saved])
+  await assert.rejects(api.applyAndRefresh({ ...client, status: async () => { throw new Error('Offline') } }, plan, () => {}), error => error === failure)
+})
+
+test('workflow approval requires a supported fingerprinted plan matching the exact selection', () => {
+  const plan = { supported: false, problems: ['Missing hooks'], repository, imageRepository: 'ghcr.io/acme/custom', secretName: 'SERVICES_PUBLISH_TOKEN', variables: {}, workflow: { supported: true, problems: [], fingerprint: 'review', files: [{ path: '.github/workflows/publish.yml', before: '', after: 'notify' }] } }
+  assert.equal(api.canOpenWorkflowPlan(plan, repository, plan.imageRepository), true)
+  assert.equal(api.canApplyPlan(plan, repository, plan.imageRepository), false)
+  assert.equal(api.canApplyPlan({ ...plan, supported: true, problems: [] }, repository, plan.imageRepository), false)
+  for (const workflow of [{ ...plan.workflow, supported: false }, { ...plan.workflow, problems: ['Unsafe'] }, { ...plan.workflow, fingerprint: '' }, { ...plan.workflow, files: [] }]) assert.equal(api.canOpenWorkflowPlan({ ...plan, workflow }, repository, plan.imageRepository), false)
+  assert.equal(api.canOpenWorkflowPlan(plan, { ...repository, installationId: 999 }, plan.imageRepository), false)
+  assert.equal(api.canOpenWorkflowPlan(plan, repository, 'ghcr.io/acme/other'), false)
+})
+
+test('PR and workflow run links are HTTPS GitHub URLs bound to the selected repository', () => {
+  assert.equal(api.githubPullRequestUrl('https://github.com/Acme/Website/pull/123', repository), true)
+  assert.equal(api.githubRunUrl('https://github.com/acme/website/actions/runs/123', repository), true)
+  for (const url of ['javascript:alert(1)', 'https://github.com.evil.test/Acme/Website/pull/123', 'https://evil@github.com/Acme/Website/pull/123', 'http://github.com/Acme/Website/pull/123', 'https://github.com/Other/Website/pull/123', 'https://github.com/Acme/Website/pull/123?redirect=evil', 'https://github.com/Acme/Website/pull/123#evil', 'https://github.com/Acme/Website/actions/runs/123']) assert.equal(api.githubPullRequestUrl(url, repository), false, url)
+  assert.equal(api.githubRunUrl('https://github.com/Other/Website/actions/runs/123', repository), false)
+})
+
+test('supported workflow review escapes complete before/after files and pending PR requires explicit review again', () => {
+  const plan = { supported: false, problems: ['Missing hook'], repository, imageRepository: 'ghcr.io/acme/custom', variables: {}, secretName: 'SERVICES_PUBLISH_TOKEN', workflow: { supported: true, problems: [], fingerprint: 'review', files: [{ path: '.github/workflows/<publish>.yml', before: '<script>before()</script>', after: '<script>after()</script>' }] } }
+  const html = renderToStaticMarkup(createElement(ui.PublisherReview, { plan }))
+  assert.match(html, /Workflow changes need a setup pull request/)
+  assert.match(html, /Before/)
+  assert.match(html, /After/)
+  assert.match(html, /&lt;script&gt;before\(\)&lt;\/script&gt;/)
+  assert.match(html, /&lt;script&gt;after\(\)&lt;\/script&gt;/)
+  assert.match(html, /&lt;publish&gt;/)
+  assert.doesNotMatch(html, /<script>|Automatic workflow editing and setup pull requests are not available/)
+  const pending = renderToStaticMarkup(createElement(ui.PublisherWorkflowPending, { plan, prUrl: 'https://github.com/Acme/Website/pull/12' }))
+  assert.match(pending, /Merge the setup PR/)
+  assert.match(pending, /href="https:\/\/github.com\/Acme\/Website\/pull\/12"/)
+  assert.match(pending, /Review again/)
+  assert.doesNotMatch(pending, /Apply &amp; test/)
+  const unsafe = renderToStaticMarkup(createElement(ui.PublisherWorkflowPending, { plan, prUrl: 'https://github.com/Other/Website/pull/12' }))
+  assert.doesNotMatch(unsafe, /href=/)
+})
+
+test('publisher API sends same-origin authenticated JSON to the contracted routes only', async () => {
+  assert.equal(typeof api.createPublisherApi, 'function')
+  const calls = []
+  const client = api.createPublisherApi(async (url, options) => { calls.push({ url, ...options }); return Response.json({ available: true }) })
+  await client.status()
+  await client.startGitHub()
+  await client.startGitHub('everyonesoftware')
+  await client.saveTailnet({ clientId: 'client', audience: 'audience', tags: 'tag:publisher' })
+  await client.repositories()
+  await client.plan(repository, 'ghcr.io/acme/custom')
+  await client.apply(repository, 'ghcr.io/acme/custom')
+  await client.test('saved/key')
+  assert.deepEqual(calls.map(({ url, method }) => [url, method]), [
+    ['/api/publishers', 'GET'], ['/api/publishers/github/start', 'POST'], ['/api/publishers/github/start', 'POST'], ['/api/publishers/tailnet', 'PUT'],
+    ['/api/publishers/repositories', 'GET'], ['/api/publishers/plan', 'POST'], ['/api/publishers', 'POST'], ['/api/publishers/saved%2Fkey/test', 'POST'],
+  ])
+  for (const call of calls) { assert.equal(call.credentials, 'same-origin'); assert.equal(call.cache, 'no-store'); assert.equal(call.headers['Content-Type'], 'application/json') }
+  assert.deepEqual(JSON.parse(calls[1].body), {})
+  assert.deepEqual(JSON.parse(calls[2].body), { organization: 'everyonesoftware' })
+  assert.deepEqual(JSON.parse(calls[5].body), { repository, imageRepository: 'ghcr.io/acme/custom' })
+  assert.deepEqual(JSON.parse(calls[6].body), { repository, imageRepository: 'ghcr.io/acme/custom' })
+  assert.deepEqual(JSON.parse(calls[7].body), {})
+})
+
+test('publisher errors retain server explanation and unauthorized status', async () => {
+  assert.equal(typeof api.createPublisherApi, 'function')
+  await assert.rejects(api.createPublisherApi(async () => Response.json({ error: 'Administrator session expired' }, { status: 401 })).status(), error => error.status === 401 && error.message === 'Administrator session expired')
+  await assert.rejects(api.createPublisherApi(async () => new Response('Installation unavailable', { status: 503 })).repositories(), /Installation unavailable/)
+})
+
+test('exact GHCR validation preserves custom names without normalization', () => {
+  assert.equal(typeof api.imageRepositoryProblem, 'function')
+  for (const value of ['ghcr.io/acme/custom', 'ghcr.io/acme/my__site', 'ghcr.io/acme/my--site']) assert.equal(api.imageRepositoryProblem(value), '')
+  for (const value of ['', 'GHCR.IO/acme/app', 'ghcr.io/Acme/app', ' ghcr.io/acme/app', 'ghcr.io/acme/app ', 'ghcr.io/acme/app:latest', 'ghcr.io/acme/app@sha256:abcd', 'ghcr.io/acme/*', 'docker.io/acme/app', 'ghcr.io/app', 'ghcr.io/acme/' + 'a'.repeat(256)]) assert.match(api.imageRepositoryProblem(value), /exact GHCR/i)
+})
+
+test('review gates unsupported plans and stale or changed repository/image selections', () => {
+  assert.equal(typeof api.canApplyPlan, 'function')
+  const plan = { supported: true, problems: [], repository, imageRepository: 'ghcr.io/acme/custom', variables: { SERVICES_PUBLISH_URL: 'https://example.test/api/images/published' }, secretName: 'SERVICES_PUBLISH_TOKEN' }
+  assert.equal(api.canApplyPlan(plan, repository, plan.imageRepository), true)
+  for (const altered of [{ ...plan, supported: false }, { ...plan, problems: ['Missing hook'] }, { ...plan, secretName: 'OTHER' }, { ...plan, repository: { ...repository, installationId: 999 } }]) assert.equal(api.canApplyPlan(altered, repository, plan.imageRepository), false)
+  assert.equal(api.canApplyPlan(plan, repository, 'ghcr.io/acme/another'), false)
+  assert.equal(api.canApplyPlan(null, repository, plan.imageRepository), false)
+})
+
+test('only awaiting callback connections trigger local status refresh; verification is not publication', () => {
+  assert.equal(typeof api.awaitingCallback, 'function')
+  for (const state of ['configured', 'verified', 'error', 'disconnected']) assert.equal(api.awaitingCallback([{ state }]), false)
+  assert.equal(api.awaitingCallback([{ state: 'verified' }, { state: 'awaiting_callback' }]), true)
+  assert.equal(api.awaitingCallback([]), false)
+})
+
+test('GitHub handoff accepts explicit HTTPS GitHub consent and installation destinations only', () => {
+  assert.equal(typeof api.githubManifestAction, 'function')
+  assert.equal(api.githubManifestAction('https://github.com/settings/apps/new?state=bound-state'), true)
+  assert.equal(api.githubManifestAction('https://github.com/organizations/everyonesoftware/settings/apps/new?state=bound-state'), true)
+  assert.equal(api.githubManifestAction('https://github.com/organizations/wrong%2Forg/settings/apps/new?state=x'), false)
+  for (const value of ['https://github.com/settings/apps/new', 'https://evil.test/settings/apps/new?state=x', 'javascript:alert(1)', 'https://github.com.evil.test/settings/apps/new?state=x', 'http://github.com/settings/apps/new?state=x', 'https://x:secret@github.com/settings/apps/new?state=x']) assert.equal(api.githubManifestAction(value), false)
+  assert.equal(api.githubInstallUrl('https://github.com/apps/services/installations/new'), true)
+  assert.equal(api.githubInstallUrl('https://evil.test/apps/services/installations/new'), false)
+})
+
+test('every page shell shares Monitor / Publishers / Accounts navigation with one correct current page', async () => {
+  assert.equal(typeof ui.Publishers, 'function')
+  const { default: App } = await server.ssrLoadModule('/src/App.tsx')
+  const { AuthAccounts } = await server.ssrLoadModule('/src/AuthAccounts.tsx')
+  const props = { user: { id: 'admin', username: 'admin', role: 'admin' }, onBack() {}, onAccounts() {}, onPublishers() {}, onLogout() {}, onPasswordChanged() {} }
+  for (const [component, page] of [[App, 'Monitor'], [ui.Publishers, 'Publishers'], [AuthAccounts, 'Accounts']]) {
+    const html = renderToStaticMarkup(createElement(component, props))
+    const nav = html.match(/<nav[^>]*aria-label="Main navigation"[^>]*>(.*?)<\/nav>/)?.[1]
+    assert.ok(nav, page)
+    assert.deepEqual([...nav.matchAll(/>(Monitor|Publishers|Accounts)</g)].map(match => match[1]), ['Monitor', 'Publishers', 'Accounts'])
+    assert.equal((nav.match(/aria-current="page"/g) || []).length, 1)
+    assert.match(nav, new RegExp('aria-current="page"[^>]*>' + page + '<'))
+  }
+})
+
+test('GitHub registration explicitly chooses personal or organization ownership', () => {
+  assert.equal(typeof ui.GitHubRegistration, 'function')
+  const props = { organization: '', onOwner() {}, onOrganization() {}, onSubmit(event) { event.preventDefault() } }
+  const personal = renderToStaticMarkup(createElement(ui.GitHubRegistration, { ...props, owner: 'personal' }))
+  assert.match(personal, /Register GitHub App under/)
+  assert.match(personal, /Personal account/)
+  assert.match(personal, /Organization/)
+  assert.doesNotMatch(personal, /name="organization"/)
+  const organization = renderToStaticMarkup(createElement(ui.GitHubRegistration, { ...props, owner: 'organization' }))
+  assert.match(organization, /Organization name/)
+  const organizationInput = organization.match(/<input\b[^>]*name="organization"[^>]*>/)?.[0]
+  assert.ok(organizationInput)
+  assert.match(organizationInput, /\brequired(?:="")?(?:\s|>)/)
+  assert.match(organization, /organization owner approval/i)
+  assert.match(organization, /private App must be registered to that organization/)
+})
+
+test('review shows exact configuration and unmet requirements without claiming workflow editing', () => {
+  assert.equal(typeof ui.PublisherReview, 'function')
+  const plan = { supported: false, problems: ['Existing notification workflow is missing'], repository, imageRepository: 'ghcr.io/acme/custom', variables: { SERVICES_PUBLISH_URL: 'https://private.test/api/images/published', TAILSCALE_CLIENT_ID: 'registered-client' }, secretName: 'SERVICES_PUBLISH_TOKEN' }
+  const html = renderToStaticMarkup(createElement(ui.PublisherReview, { plan }))
+  for (const text of ['Existing notification workflow is missing', 'ghcr.io/acme/custom', 'SERVICES_PUBLISH_TOKEN', 'TAILSCALE_CLIENT_ID', 'registered-client', 'https://private.test/api/images/published']) assert.ok(html.includes(text), text)
+  assert.match(html, /No workflow files are changed/)
+  assert.match(html, /not overwritten/)
+  assert.match(html, /manually/i)
+})
+
+test('server connection states never invent a publication or infer verification from acceptance', () => {
+  assert.equal(typeof ui.PublisherConnection, 'function')
+  const connection = { id: 'connection', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '2026-01-01T00:00:00Z' }
+  for (const [state, label] of [['configured', 'Configured'], ['awaiting_callback', 'Waiting for authenticated callback'], ['verified', 'Connectivity verified'], ['error', 'Connection needs attention'], ['disconnected', 'Disconnected']]) {
+    const html = renderToStaticMarkup(createElement(ui.PublisherConnection, { connection: { ...connection, state, error: state === 'error' ? 'Runner cannot reach HTTPS endpoint' : undefined }, busy: false, onTest() {} }))
+    assert.ok(html.includes(label), label)
+    assert.doesNotMatch(html, /Receiving publications|Latest publication|Publication received/)
+    if (state === 'verified') assert.match(html, /not a successful publication/)
+    if (state === 'error') assert.match(html, /Runner cannot reach HTTPS endpoint/)
+  }
+})
+
+test('verified connections render only actual publication metadata and a repository-bound run link', () => {
+  const publication = { version: '<release>', digest: 'sha256:' + 'a'.repeat(64), tags: ['latest', 'release'], commit: 'abc123', runUrl: 'https://github.com/Acme/Website/actions/runs/42', publishedAt: '2026-01-01T00:00:00Z', receivedAt: '2026-01-01T00:01:00Z', result: 'accepted' }
+  const connection = { id: 'saved', state: 'verified', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: publication.publishedAt, lastPublication: publication }
+  const render = next => renderToStaticMarkup(createElement(ui.PublisherConnection, { connection: next, busy: false, onTest() {} }))
+  const html = render(connection)
+  for (const text of ['Latest publication', '&lt;release&gt;', publication.digest, 'latest', 'release', 'abc123', 'accepted', 'Published', 'Received']) assert.ok(html.includes(text), text)
+  assert.match(html, /href="https:\/\/github.com\/Acme\/Website\/actions\/runs\/42"/)
+  assert.doesNotMatch(html, /<release>/)
+  assert.doesNotMatch(render({ ...connection, lastPublication: { ...publication, runUrl: 'javascript:alert(1)' } }), /href="javascript:/)
+  assert.doesNotMatch(render({ ...connection, lastPublication: { ...publication, runUrl: 'https://github.com/Other/Website/actions/runs/42' } }), /href=/)
+  for (const lastPublication of [undefined, { ...publication, digest: '' }, { ...publication, receivedAt: '' }]) assert.doesNotMatch(render({ ...connection, lastPublication }), /Latest publication|Receiving publications/)
+  for (const state of ['configured', 'awaiting_callback', 'error', 'disconnected']) assert.doesNotMatch(render({ ...connection, state }), /Latest publication|Receiving publications/)
+})
+
+test('connection management exposes recovery only for errors and no actions for disconnected connections', () => {
+  const connection = { id: 'saved', state: 'error', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '2026-01-01T00:00:00Z' }
+  const props = { busy: false, onTest() {}, onRecover() {}, onManage() {} }
+  const error = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection }))
+  assert.match(error, /Repair &amp; retry push/)
+  assert.match(error, /saved setup.*no duplicate key/i)
+  assert.match(error, />Disconnect</)
+  const verified = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection: { ...connection, state: 'verified' } }))
+  assert.match(verified, />Rotate key</)
+  assert.doesNotMatch(verified, /Repair &amp; retry/)
+  const disconnected = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection: { ...connection, state: 'disconnected' } }))
+  assert.doesNotMatch(disconnected, /<button/)
+})
+
+test('disconnected publisher with pending remote disable exposes only a targeted cleanup retry', () => {
+  const calls = []
+  const connection = { id: 'saved', state: 'disconnected', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '', remoteDisablePending: true, error: 'GitHub disable could not be verified' }
+  const props = { connection, busy: false, onTest: () => calls.push('test'), onManage: (target, action) => calls.push([target.id, action]) }
+  const html = renderToStaticMarkup(createElement(ui.PublisherConnection, props))
+  assert.match(html, /Retry GitHub cleanup/)
+  assert.doesNotMatch(html, /Rotate key|Retry push test/)
+  const elements = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(elements) : [node, ...elements(node.props?.children)]
+  const button = elements(ui.PublisherConnection(props)).find(node => node.type === 'button')
+  button.props.onClick()
+  assert.deepEqual(calls, [['saved', 'disconnect']])
+})
+
+test('named compact confirmations explain owned resources, callback-safe rotation, and default cancellation', () => {
+  const connection = { id: 'saved', state: 'verified', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '' }
+  for (const action of ['disconnect', 'rotate']) {
+    const html = renderToStaticMarkup(createElement(ui.PublisherConfirmation, { connection, action, busy: false, onCancel() {}, onConfirm() {} }))
+    assert.match(html, /<dialog[^>]*class="publisher-confirmation"/)
+    assert.match(html, /Acme\/Website/)
+    assert.match(html, /ghcr.io\/acme\/custom/)
+    assert.match(html, />Cancel</)
+    assert.ok(html.indexOf('>Cancel<') < html.indexOf(action === 'disconnect' ? '>Disconnect publisher<' : '>Rotate &amp; test push<'))
+    if (action === 'disconnect') { assert.match(html, /revoke/i); assert.match(html, /owned notification configuration/); assert.match(html, /Shared Tailscale.*not.*deleted/) }
+    else { assert.match(html, /old key stays active until.*authenticated callback/i); assert.match(html, /accepted dispatch is not success/i) }
+  }
+})
+
+test('connection buttons invoke only their explicit target action, without dispatching on render', () => {
+  const calls = []
+  const connection = { id: 'saved/key', state: 'verified', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '' }
+  const elements = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(elements) : [node, ...elements(node.props?.children)]
+  const props = { connection, busy: false, onTest: id => calls.push(['test', id]), onRecover: id => calls.push(['recover', id]), onManage: (next, action) => calls.push([action, next.id]) }
+  const tree = ui.PublisherConnection(props)
+  assert.deepEqual(calls, [])
+  const buttons = elements(tree).filter(node => node.type === 'button')
+  assert.deepEqual(buttons.map(node => node.props.children), ['Test push again', 'Rotate key', 'Disconnect'])
+  for (const button of buttons) button.props.onClick()
+  assert.deepEqual(calls, [['test', 'saved/key'], ['rotate', 'saved/key'], ['disconnect', 'saved/key']])
+  const recovery = elements(ui.PublisherConnection({ ...props, connection: { ...connection, state: 'error' } })).find(node => node.type === 'button' && node.props.children === 'Repair & retry push')
+  recovery.props.onClick()
+  assert.deepEqual(calls.at(-1), ['recover', 'saved/key'])
+  const pending = elements(ui.PublisherConnection({ ...props, connection: { ...connection, state: 'awaiting_callback' } })).filter(node => node.type === 'button')
+  assert.deepEqual(pending.map(node => node.props.children), ['Disconnect'])
+})
+
+test('failed management requests retain a visible error inside the confirmation', () => {
+  const html = renderToStaticMarkup(createElement(ui.PublisherConfirmation, { connection: { id: 'saved', repository, imageRepository: 'ghcr.io/acme/custom' }, action: 'disconnect', busy: false, error: 'GitHub configuration unavailable', onCancel() {}, onConfirm() {} }))
+  assert.match(html, /role="alert"[^>]*>GitHub configuration unavailable/)
+  assert.match(html, />Cancel</)
+})
+
+test('workflow diff and compact confirmation styling preserve the responsive warm surface and shared footer', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const css = await readFile(new URL('./Publishers.css', import.meta.url), 'utf8')
+  assert.match(css, /\.publisher-diff\s*\{[^}]*grid-template-columns:/)
+  assert.match(css, /\.publisher-confirmation\s*\{[^}]*max-width:\s*520px/)
+  assert.match(css, /\.publisher-confirmation\s*\{[^}]*background:\s*var\(--surface\)/)
+  assert.match(css, /@media[^}]*760px[\s\S]*\.publisher-diff[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/)
+})
+
+test('shared wizard footer keeps explicit PR, review-again and apply approvals distinct and gated', () => {
+  const calls = []
+  const props = { step: 2, busy: false, available: true, canAdvance: true, workflowNeeded: false, pendingWorkflow: false, onBack: () => calls.push('back'), onAdvance: () => calls.push('advance'), onCancel: () => calls.push('cancel') }
+  for (const [state, label] of [[{}, 'Apply &amp; test push'], [{ workflowNeeded: true }, 'Open setup PR'], [{ workflowNeeded: true, pendingWorkflow: true }, 'Review again']]) {
+    const html = renderToStaticMarkup(createElement(ui.PublisherFooter, { ...props, ...state }))
+    assert.match(html, /<footer class="publisher-footer">/)
+    assert.ok(html.includes(label), label)
+    assert.match(html, />Back</)
+    assert.match(html, /Cancel setup/)
+    assert.equal((html.match(/class="button primary"/g) || []).length, 1)
+  }
+  for (const state of [{ canAdvance: false }, { busy: true }, { available: false }]) {
+    const html = renderToStaticMarkup(createElement(ui.PublisherFooter, { ...props, ...state }))
+    const primary = html.match(/<button[^>]*class="button primary"[^>]*>/)?.[0]
+    assert.match(primary, /\bdisabled/)
+  }
+  const tree = ui.PublisherFooter(props)
+  const children = tree.props.children.flat().filter(Boolean)
+  children.find(node => node.props?.children === 'Back').props.onClick()
+  children.find(node => node.props?.children === 'Cancel setup').props.onClick()
+  assert.deepEqual(calls, ['back', 'cancel'])
+  children.find(node => node.props?.className === 'button primary').props.onClick()
+  assert.deepEqual(calls, ['back', 'cancel', 'advance'])
+})

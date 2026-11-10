@@ -126,6 +126,16 @@ func (s *Server) newPublicationHandler(token string, legacyAllowed map[string]st
 			http.Error(w, "Image repository is outside credential scope", http.StatusForbidden)
 			return
 		}
+		if managed {
+			if err := s.publisherProvenance(key, publication); err != nil {
+				if errors.Is(err, auth.ErrUnauthorized) {
+					http.Error(w, "Publication source is outside this connection's scope", http.StatusForbidden)
+				} else {
+					http.Error(w, "Publisher configuration unavailable", http.StatusServiceUnavailable)
+				}
+				return
+			}
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 		result, err := receiver.AcceptPublication(ctx, publication)
@@ -140,6 +150,12 @@ func (s *Server) newPublicationHandler(token string, legacyAllowed map[string]st
 		if result != "accepted" && result != "duplicate" && result != "stale" {
 			http.Error(w, "Unexpected publication result", http.StatusInternalServerError)
 			return
+		}
+		if managed {
+			if err := s.recordPublisherReceipt(key, publication, result); err != nil {
+				http.Error(w, "Publication recorded but connection receipt could not be persisted; retry the original payload", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = fmt.Fprintf(w, "{\"result\":%q}\n", result)

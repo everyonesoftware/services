@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import App from './App.tsx'
 import { AuthAccounts } from './AuthAccounts.tsx'
+import { Publishers } from './Publishers.tsx'
+import type { AppPage } from './Publishers.tsx'
 import { AuthError, authRequest, sessionExpiredEvent, sessionFetch } from './authApi.ts'
 import type { AuthUser } from './authApi.ts'
 import './App.css'
@@ -32,7 +34,14 @@ export function AuthForm({ setup, onAuthenticated }: { setup: boolean; onAuthent
 
 export function AuthGate() {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [accounts, setAccounts] = useState(false)
+  const pageFromHash = (): AppPage => typeof window !== 'undefined' && window.location.hash === '#publishers' ? 'publishers' : typeof window !== 'undefined' && window.location.hash === '#accounts' ? 'accounts' : 'monitor'
+  const [page, setPage] = useState<AppPage>(pageFromHash)
+  const navigate = (next: AppPage) => { window.location.hash = next; setPage(next) }
+  useEffect(() => {
+    const changed = () => setPage(pageFromHash())
+    window.addEventListener('hashchange', changed)
+    return () => window.removeEventListener('hashchange', changed)
+  }, [])
   const [setup, setSetup] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -59,18 +68,18 @@ export function AuthGate() {
     if (!user) return
     const original = window.fetch
     let active = true
-    const expired = () => { setUser(null); setAccounts(false); setError(''); setSetup(false) }
+    const expired = () => { setUser(null); setPage('monitor'); setError(''); setSetup(false) }
     window.addEventListener(sessionExpiredEvent, expired)
     // Install before descendant polling effects; ignore late responses from an old session.
     window.fetch = sessionFetch(original, () => { if (active) window.dispatchEvent(new Event(sessionExpiredEvent)) }, window.location.origin)
     return () => { active = false; window.fetch = original; window.removeEventListener(sessionExpiredEvent, expired) }
   }, [user])
   const logout = async () => {
-    try { await authRequest('/logout', { method: 'POST', body: {} }); setUser(null); setAccounts(false); setError(''); setSetup(false) }
+    try { await authRequest('/logout', { method: 'POST', body: {} }); setUser(null); setPage('monitor'); setError(''); setSetup(false) }
     catch (cause) { setError(message(cause)) }
   }
   if (loading) return <main className="auth-shell" role="status">Checking session…</main>
   if (error && !user) return <main className="auth-shell"><section className="auth-card"><p role="alert" className="notice danger">{error}</p><button className="button secondary" onClick={() => setRevision(value => value + 1)}>Try again</button></section></main>
   if (!user) return <AuthForm key={setup ? 'setup' : 'login'} setup={setup} onAuthenticated={setUser} />
-  return <>{error && <p role="alert" className="notice danger">{error}</p>}{accounts ? <AuthAccounts user={user} onBack={() => setAccounts(false)} onLogout={() => void logout()} onPasswordChanged={() => { setUser(null); setAccounts(false); setSetup(false) }} /> : <App user={user} onAccounts={() => setAccounts(true)} onLogout={() => void logout()} />}</>
+  return <>{error && <p role="alert" className="notice danger">{error}</p>}{page === 'accounts' ? <AuthAccounts user={user} onBack={() => navigate('monitor')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} onPasswordChanged={() => { setUser(null); navigate('monitor'); setSetup(false) }} /> : page === 'publishers' ? <Publishers user={user} onBack={() => navigate('monitor')} onAccounts={() => navigate('accounts')} onLogout={() => void logout()} /> : <App user={user} onAccounts={() => navigate('accounts')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} />}</>
 }

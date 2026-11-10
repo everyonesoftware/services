@@ -126,7 +126,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*http.Reques
 		http.Error(w, "Cross-origin action rejected", http.StatusForbidden)
 		return r, false
 	}
-	if r.URL.Path == "/api/images/published" {
+	if r.URL.Path == "/api/images/published" || r.URL.Path == "/api/publishers/callback" {
 		http.Error(w, "A scoped publisher API key is required", http.StatusForbidden)
 		return r, false
 	}
@@ -148,7 +148,7 @@ func (s *Server) serverClientAllowed(r *http.Request) bool {
 
 func keyRouteAllowed(key auth.APIKey, r *http.Request) bool {
 	for _, scope := range key.Scopes {
-		if scope == "publications:write" && r.Method == http.MethodPost && r.URL.Path == "/api/images/published" {
+		if scope == "publications:write" && r.Method == http.MethodPost && (r.URL.Path == "/api/images/published" || r.URL.Path == "/api/publishers/callback") {
 			return true
 		}
 		if scope == "services:read" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {

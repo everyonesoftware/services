@@ -92,6 +92,12 @@ func main() {
 			stop()
 			_ = publications.Close()
 		}()
+		publisherStore, publisherErr := configurePublishersAt(handler, os.Getenv("SERVICES_DATA_DIR"))
+		if publisherErr != nil {
+			log.Printf("Publisher setup disabled: %v", publisherErr)
+		} else {
+			defer publisherStore.Close()
+		}
 	}
 	configureOperations(ctx, handler, socket)
 	go checker.Run(ctx, source)
