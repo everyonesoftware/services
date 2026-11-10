@@ -26,6 +26,10 @@ export function saveIcon(target: IconTarget, url: string, fetcher: typeof fetch 
   return iconRequest('/api/icons', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: target.kind, key: target.key, url }) }, fetcher, timeoutMs)
 }
 
+export function uploadIcon(target: IconTarget, file: File, fetcher: typeof fetch = fetch, timeoutMs = 30_000): Promise<Icon> {
+  return iconRequest(`/api/icons/upload?kind=${encodeURIComponent(target.kind)}&key=${encodeURIComponent(target.key)}`, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file }, fetcher, timeoutMs)
+}
+
 export function deleteIcon(target: IconTarget, fetcher: typeof fetch = fetch, timeoutMs = 12_000): Promise<void> {
   return iconRequest(`/api/icons?kind=${encodeURIComponent(target.kind)}&key=${encodeURIComponent(target.key)}`, { method: 'DELETE' }, fetcher, timeoutMs)
 }

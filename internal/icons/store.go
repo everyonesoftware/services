@@ -40,6 +40,7 @@ var ErrDownload = errors.New("icon download failed")
 var ErrUnavailable = errors.New("icon storage unavailable; reopen required")
 
 // Icon.URL is always a local immutable asset URL; SourceURL is provenance only.
+// An empty SourceURL identifies an uploaded file, not a remote download.
 type Icon struct {
 	Kind      string `json:"kind"`
 	Key       string `json:"key"`
@@ -106,8 +107,10 @@ func OpenWithDownloader(directory string, downloader Downloader) (*Store, error)
 		if err = validateTarget(icon.Kind, icon.Key); err != nil {
 			return nil, err
 		}
-		if err = validateURL(icon.SourceURL); err != nil {
-			return nil, err
+		if icon.SourceURL != "" {
+			if err = validateURL(icon.SourceURL); err != nil {
+				return nil, err
+			}
 		}
 		name := strings.TrimPrefix(icon.URL, "/api/icons/images/")
 		if !assetName.MatchString(name) || icon.URL != "/api/icons/images/"+name {
@@ -186,6 +189,22 @@ func (s *Store) Put(ctx context.Context, kind, key, sourceURL string) (Icon, err
 	data, err := s.downloader.Download(ctx, sourceURL)
 	if err != nil {
 		return Icon{}, fmt.Errorf("%w: %v", ErrDownload, err)
+	}
+	return s.save(ctx, kind, key, sourceURL, data)
+}
+
+// Upload validates image bytes directly, without contacting an external host or
+// trusting a client filename or MIME type. Persistence is shared with URL imports.
+func (s *Store) Upload(ctx context.Context, kind, key string, data []byte) (Icon, error) {
+	return s.save(ctx, kind, key, "", data)
+}
+
+func (s *Store) save(ctx context.Context, kind, key, sourceURL string, data []byte) (Icon, error) {
+	if !s.Available() {
+		return Icon{}, ErrUnavailable
+	}
+	if err := validateTarget(kind, key); err != nil {
+		return Icon{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	normalized, err := normalize(data)
 	if err != nil {

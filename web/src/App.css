@@ -321,6 +321,10 @@ input[type=checkbox] { accent-color: var(--teal); }
 .icon-field-label { margin-bottom: 6px; }
 .icon-url { width: 100%; border: 1px solid #bcc4b8; border-radius: 5px; background: var(--surface); color: #323d33; padding: 10px; font-size: 12px; min-height: 42px; }
 .icon-help { margin-top: 7px; }
+.icon-source { width: fit-content; margin-bottom: 14px; }
+.icon-file { width: 100%; min-width: 0; font-size: 12px; color: var(--muted); }
+.icon-file::file-selector-button { border: 1px solid #bcc4b8; border-radius: 5px; background: var(--surface); color: #323d33; padding: 9px 10px; margin-right: 8px; font: inherit; cursor: pointer; }
+#icon-filename { overflow-wrap: anywhere; }
 .icon-error { font-size: 11px; color: #97523d; margin-top: 7px; overflow-wrap: anywhere; }
 .icon-error:empty { margin: 0; }
 .icon-storage { border-top: 1px solid var(--border); padding-top: 13px; margin-top: 16px; }

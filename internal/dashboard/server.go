@@ -103,6 +103,7 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 	s := &Server{source: source, updates: updates, updater: updater, allowedHosts: allowed, publicOrigin: publicOrigin, version: version, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/icons", s.listIcons)
 	s.mux.HandleFunc("PUT /api/icons", s.putIcon)
+	s.mux.HandleFunc("PUT /api/icons/upload", s.uploadIcon)
 	s.mux.HandleFunc("DELETE /api/icons", s.deleteIcon)
 	s.mux.HandleFunc("GET /api/icons/images/{name}", s.iconImage)
 	s.mux.HandleFunc("GET /api/ready", s.ready)
