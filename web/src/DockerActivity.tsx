@@ -2,8 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Operation } from './types.ts'
 import { acknowledgeOperation } from './api.ts'
 import { compactOperationOutput } from './operationOutput.ts'
+import { ActivityTimestamp } from './ActivityTimestamp.tsx'
+import { formatActivityTimestamp } from './activityTime.ts'
 
-const timestamp = (value?: string) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleTimeString() : '—'
+const timestamp = (value?: string) => {
+  const parts = formatActivityTimestamp(value)
+  return parts ? `${parts.date} · ${parts.time}` : '—'
+}
 const phaseLabels: Record<string, string> = { preparing: 'Preparing', pulling: 'Pulling', applying: 'Applying', verifying: 'Verifying', recovering: 'Recovering' }
 const stateLabel = (operation: Operation) => operation.state === 'queued' ? `Queued${operation.queuePosition ? ` #${operation.queuePosition}` : ''}` : operation.state === 'running' ? phaseLabels[operation.phase ?? ''] || 'Running' : operation.state === 'complete' ? 'Completed' : operation.phase === 'interrupted' || operation.needsAttention ? 'Interrupted' : 'Failed'
 
@@ -54,7 +59,7 @@ export function OperationRow({ operation, duration }: { operation: Operation; du
   const latest = progressRows.length ? `Progress updates in place · ${progressRows.length} tracked items` : rows.at(-1)?.text
   useEffect(() => { if (follow && output.current) output.current.scrollTop = output.current.scrollHeight }, [follow, raw, operation.messages])
   return <details className={`operation-row ${operation.state}`}>
-    <summary><span className={`status-badge ${operation.state === 'error' ? 'bad' : operation.state === 'complete' ? 'good' : 'caution'}`}>{stateLabel(operation)}</span><span className="operation-identity"><strong>{operation.project || 'Container action'}</strong><span>{operation.action}</span></span>{duration && <span className="activity-duration">{duration.text}<small>{duration.note}</small></span>}<span className="operation-time">{operation.finishedAt ? 'Finished' : operation.startedAt ? 'Started' : 'Queued'} <time>{timestamp(operation.finishedAt || operation.startedAt || operation.queuedAt)}</time></span><span className="disclosure" aria-hidden="true">›</span></summary>
+    <summary><span className={`status-badge ${operation.state === 'error' ? 'bad' : operation.state === 'complete' ? 'good' : 'caution'}`}>{stateLabel(operation)}</span><span className="operation-identity"><strong>{operation.project || 'Container action'}</strong><span>{operation.action}</span></span>{duration && <span className="activity-duration">{duration.text}<small>{duration.note}</small></span>}<span className="operation-time"><ActivityTimestamp value={[operation.finishedAt, operation.startedAt, operation.queuedAt].find(value => value && Number.isFinite(Date.parse(value)))} /></span><span className="disclosure" aria-hidden="true">›</span></summary>
     <div className="operation-inspection">
       <p className="operation-latest">{operation.error || latest || 'Waiting for its turn. Docker state will be checked when the update starts.'}</p>
       <div className="operation-output">

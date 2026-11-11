@@ -12,6 +12,53 @@ const base = { operations: [], events: [], operationsLoading: false, eventsLoadi
 const render = props => renderToStaticMarkup(createElement(ActivityFeed, { ...base, ...props }))
 const operation = { id: 'fixture-operation', project: '<project>', action: 'update project', state: 'complete', queuedAt: '2026-11-11T11:55:00Z', startedAt: '2026-11-11T11:56:00Z', finishedAt: '2026-11-11T11:57:00Z', messages: ['<script>unsafe output</script>'] }
 
+test('operation and event summaries show local YYYY-MM-DD dates after the time without lifecycle captions', () => {
+  const event = { id: 'fixture-event', project: 'jellyfin', kind: 'healthy', message: 'Healthy', time: '2026-01-01T00:30:05+14:00' }
+  const localDate = value => {
+    const date = new Date(value)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  }
+  const html = render({ operations: [operation], events: [event] })
+  const timestamps = [...html.matchAll(/<time\b[^>]*>[\s\S]*?<\/time>/g)].map(match => match[0])
+  assert.equal(timestamps.length, 2)
+  for (const [index, value] of [operation.finishedAt, event.time].entries()) {
+    const stamp = timestamps[index]
+    assert.ok(stamp.includes(`dateTime="${value}"`))
+    assert.match(stamp, /class="activity-clock"/)
+    assert.ok(stamp.includes(`<span class="activity-date">${localDate(value)}</span>`), stamp)
+    assert.ok(stamp.indexOf('activity-clock') < stamp.indexOf('activity-date'))
+    assert.doesNotMatch(stamp, /Finished|Observed|Started|Queued/)
+  }
+  const summary = html.match(/<summary>[\s\S]*?<\/summary>/)[0]
+  assert.doesNotMatch(summary, /Finished|Observed/)
+  assert.match(html, /Queued \d{4}-\d{2}-\d{2} ·/)
+  assert.match(html, /Started \d{4}-\d{2}-\d{2} ·/)
+  assert.match(html, /Finished \d{4}-\d{2}-\d{2} ·/)
+})
+
+test('operation timestamps retain finish/start/queue precedence and skip invalid lifecycle dates', () => {
+  for (const [changes, expected] of [
+    [{}, operation.finishedAt],
+    [{ state: 'running', finishedAt: undefined }, operation.startedAt],
+    [{ state: 'queued', finishedAt: undefined, startedAt: undefined }, operation.queuedAt],
+    [{ finishedAt: 'invalid' }, operation.startedAt],
+    [{ finishedAt: 'invalid', startedAt: 'invalid' }, operation.queuedAt],
+  ]) {
+    const summary = render({ operations: [{ ...operation, ...changes }] }).match(/<summary>[\s\S]*?<\/summary>/)[0]
+    assert.ok(summary.includes(`dateTime="${expected}"`), summary)
+    assert.doesNotMatch(summary, /Finished|Started|Invalid Date/)
+  }
+})
+
+test('missing and invalid activity timestamps stay unknown rather than fabricating a date', () => {
+  const html = render({
+    operations: [{ ...operation, finishedAt: 'invalid', startedAt: '', queuedAt: '' }],
+    events: [{ id: 'unknown', kind: 'connected', message: 'Unknown time', time: 'invalid' }],
+  })
+  assert.equal((html.match(/class="activity-timestamp">Unknown time/g) || []).length, 2)
+  assert.doesNotMatch(html, /<time\b|activity-date|Invalid Date/)
+})
+
 test('activity distinguishes initial loading, known empty history and unavailable activity', () => {
   assert.match(render({ operationsLoading: true }), /Loading activity…/)
   assert.doesNotMatch(render({ operationsLoading: true }), /No activity yet/)

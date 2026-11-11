@@ -1,0 +1,8 @@
+.activity-timestamp { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; color: var(--muted); font: 10px var(--mono); white-space: nowrap; }
+.activity-date { font-size: 9px; }
+.activity-time-separator { display: none; }
+@media (max-width: 640px) {
+  .activity-timestamp { flex-direction: row; align-items: baseline; gap: 0; }
+  .activity-date { font-size: inherit; }
+  .activity-time-separator { display: inline; white-space: pre; }
+}

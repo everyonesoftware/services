@@ -265,6 +265,8 @@ input[type=checkbox] { accent-color: var(--teal); }
 .operation-list { display: grid; gap: 6px; margin-top: 10px; }
 .operation-row { min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); overflow: hidden; }
 .operation-row > summary { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 48px; }
+.operation-row > summary > .status-badge { border-radius: 999px; }
+.operation-row > summary > .status-badge.good { background: #edf4ed; border-color: #cadbcf; }
 .operation-row[open] > summary .disclosure { transform: rotate(90deg); }
 .operation-identity { flex: 1; display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .operation-identity strong { font-size: 12px; font-weight: 600; }

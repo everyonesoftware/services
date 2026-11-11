@@ -4,11 +4,11 @@ import { activityApplications, activityRuntime, buildActivity, selectActivity } 
 import type { ActivityEntry, ActivityKind, ActivitySort } from './activity.ts'
 import { ActivityHelp, OperationNotices, OperationRow } from './DockerActivity.tsx'
 import type { MonitorEvent, Operation } from './types.ts'
+import { ActivityTimestamp } from './ActivityTimestamp.tsx'
 import './ActivityFeed.css'
 
 const kindLabels: Record<ActivityKind, string> = { all: 'All activity', operations: 'Operations', events: 'Monitor events' }
 const sortLabels: Record<ActivitySort, string> = { newest: 'Newest first', oldest: 'Oldest first', longest: 'Longest first', shortest: 'Shortest first' }
-const formatTime = (value: number | null) => value === null ? 'Unknown time' : new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const formatRuntime = (value: number) => {
   const seconds = Math.floor(value / 1000)
   const minutes = Math.floor(seconds / 60)
@@ -91,7 +91,7 @@ function FeedEntry({ entry, now }: { entry: ActivityEntry; now: number }) {
   return <article className="activity-event">
     <span className={`activity-event-kind ${event.kind}`}><i />{event.kind.replaceAll('_', ' ')}</span>
     <div className="activity-event-identity"><strong>{event.project || event.name || 'Engine'}</strong><span>Monitor event</span><p>{event.message}</p>{event.name && event.project && <code>{event.name}</code>}</div>
-    <Duration note="Point-in-time">—</Duration><time className="activity-event-time" dateTime={entry.timestamp === null ? undefined : event.time} title={entry.timestamp === null ? undefined : new Date(entry.timestamp).toLocaleString()}>{formatTime(entry.timestamp)}<small>Observed</small></time><span />
+    <Duration note="Point-in-time">—</Duration><span className="activity-event-time"><ActivityTimestamp value={event.time} /></span><span />
   </article>
 }
 
