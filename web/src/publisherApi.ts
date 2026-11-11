@@ -11,7 +11,7 @@ export type Connection = {
 }
 export type PublisherStatus = {
   available: boolean; reason?: string
-  github: { connected: boolean; name?: string; installUrl?: string }
+  github: { connected: boolean; name?: string; installUrl?: string; permissionsChecked?: boolean; variablesWrite?: boolean; settingsUrl?: string }
   tailnet: { clientId: string; audience: string; tags: string }
   endpoint: string; connections: Connection[]
 }
@@ -22,6 +22,13 @@ export type PublisherPlan = {
   workflow?: { supported: boolean; problems: string[]; files: { path: string; before: string; after: string }[]; fingerprint: string }
 }
 export type GitHubStart = { action: string; manifest: string }
+
+export function githubVariablesReady(github: PublisherStatus['github']) {
+  return github.connected === true && github.permissionsChecked === true && github.variablesWrite === true
+}
+export function readyForPublisherRepositories(status: PublisherStatus | null) {
+  return !!(status?.available === true && githubVariablesReady(status.github) && status.tailnet.clientId && status.tailnet.audience && status.tailnet.tags)
+}
 
 export function imageRepositoryProblem(value: string) {
   return value.length <= 255 && /^ghcr\.io\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+$/.test(value)
@@ -42,6 +49,11 @@ export function canOpenWorkflowPlan(plan: PublisherPlan | null, repository: Repo
 }
 function githubUrl(value: string) {
   try { const url = new URL(value); return url.protocol === 'https:' && url.hostname === 'github.com' && !url.port && !url.username && !url.password && !url.hash ? url : null } catch { return null }
+}
+export function githubPermissionsUrl(value: string) {
+  // Match the original string, not a normalized URL: reject traversal, encodings,
+  // explicit ports (including :443), credentials and even empty query/hash suffixes.
+  return /^https:\/\/github\.com\/(?:settings\/apps|organizations\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/settings\/apps)\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/permissions$/.test(value) && !/[\r\n]/.test(value)
 }
 export function githubManifestAction(value: string) {
   const url = githubUrl(value)
@@ -106,6 +118,7 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
   }
   return {
     status: (signal?: AbortSignal) => request<PublisherStatus>('', 'GET', undefined, signal),
+    checkGitHubPermissions: () => request<PublisherStatus>('/github/permissions', 'POST', {}),
     startGitHub: (organization?: string) => request<GitHubStart>('/github/start', 'POST', organization === undefined ? {} : { organization }),
     saveTailnet: (body: PublisherStatus['tailnet']) => request<PublisherStatus>('/tailnet', 'PUT', body),
     repositories: () => request<{ repositories: Repository[] }>('/repositories'),
@@ -126,6 +139,13 @@ async function readSavedPublisherStatus(client: Pick<ReturnType<typeof createPub
   const timer = setTimeout(() => controller.abort(), 12_000)
   try { return await client.status(controller.signal) }
   finally { clearTimeout(timer) }
+}
+
+export async function checkGitHubPermissionsAndRefresh(client: Pick<ReturnType<typeof createPublisherApi>, 'checkGitHubPermissions'>, current: PublisherStatus, onStatus: (status: PublisherStatus) => void, clearReview: () => void) {
+  // A failed recheck must not leave the previous grant or review usable.
+  onStatus({ ...current, github: { ...current.github, permissionsChecked: false, variablesWrite: false } })
+  clearReview()
+  onStatus(await client.checkGitHubPermissions())
 }
 
 export async function applyAndRefresh(client: Pick<ReturnType<typeof createPublisherApi>, 'apply' | 'status'>, plan: Pick<PublisherPlan, 'repository' | 'imageRepository' | 'approval'>, onStatus: (status: PublisherStatus) => void) {

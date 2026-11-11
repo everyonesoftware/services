@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, RefObject } from 'react'
-import { applyAndRefresh, awaitingCallback, canApplyPlan, canOpenWorkflowPlan, createPublisherApi, githubInstallUrl, githubManifestAction, githubPullRequestUrl, githubRunUrl, imageRepositoryProblem, refreshAfterPublisherTimeout } from './publisherApi.ts'
+import { applyAndRefresh, awaitingCallback, canApplyPlan, canOpenWorkflowPlan, checkGitHubPermissionsAndRefresh, createPublisherApi, githubInstallUrl, githubManifestAction, githubPermissionsUrl, githubPullRequestUrl, githubRunUrl, githubVariablesReady, imageRepositoryProblem, readyForPublisherRepositories, refreshAfterPublisherTimeout } from './publisherApi.ts'
 import type { Connection, GitHubStart, PublisherPlan, PublisherStatus, Repository } from './publisherApi.ts'
 import type { AuthUser } from './authApi.ts'
 import './Publishers.css'
@@ -28,6 +28,26 @@ export function GitHubManifestForm({ manifest, lockRef }: { manifest: GitHubStar
     // serializes this native POST omits the manifest, so GitHub receives no JSON.
     lockRef.current = true
   }}><input type="hidden" name="manifest" value={manifest.manifest} /><button className="button primary" type="submit">Continue to GitHub ↗</button></form>
+}
+
+export function GitHubPermissionNotice({ github, busy, onFinish }: { github: PublisherStatus['github']; busy: boolean; onFinish: () => void }) {
+  if (!github.connected || githubVariablesReady(github)) return null
+  return <section className="publisher-info publisher-warning" role="status"><strong>GitHub App permission setup is pending</strong><p>Finish the one-time Variables permission approval before installing or selecting repositories.</p><button className="button secondary" disabled={busy} onClick={onFinish}>Finish GitHub permission setup →</button></section>
+}
+
+export function GitHubPermissions({ github, busy, onCheck }: { github: PublisherStatus['github']; busy: boolean; onCheck: () => void }) {
+  if (!github.connected) return null
+  const ready = githubVariablesReady(github)
+  const checked = github.permissionsChecked === true && typeof github.variablesWrite === 'boolean'
+  return <><section className={`publisher-info ${ready ? '' : 'publisher-warning'}`} aria-label="GitHub Variables permission"><h3>One-time GitHub Variables permission</h3>
+    <p>GitHub cannot request Variables permission during manifest registration. Finish this one-time approval manually; Services still configures repositories automatically after your review.</p>
+    <p>GitHub App settings → Permissions &amp; events → Repository permissions → Variables → Read and write → Save.</p>
+    {github.settingsUrl && githubPermissionsUrl(github.settingsUrl) ? !busy && <a className="button secondary" href={github.settingsUrl} target="_blank" rel="noreferrer">Open GitHub App permission settings ↗</a> : <p>Check permissions to load settings link.</p>}
+    <p>For each existing installation, its account owner or organization owner must also approve updated access in GitHub installation settings → Configure. Saving App permissions alone does not update existing installation access.</p>
+    <p role="status"><strong>{ready ? 'Variables write permission verified' : checked ? 'Variables write permission is missing' : 'Variables permission has not been checked'}</strong></p>
+    <button className="button secondary" type="button" disabled={busy} onClick={onCheck}>Check GitHub permissions</button>
+    <p className="publisher-muted">Permission checks run on demand, without GitHub polling. Before review and apply, the server makes a fresh check with the actual installation-scoped token.</p>
+  </section>{ready && <div className="publisher-info"><strong>Choose repository access on GitHub</strong><p>Install the app on the repositories you want to connect. After approving installation, return here and select a repository. Use Refresh repositories to discover newly granted access.</p>{github.installUrl && githubInstallUrl(github.installUrl) ? !busy && <a className="button secondary" href={github.installUrl} target="_blank" rel="noreferrer">Install on selected repositories ↗</a> : <p>Installation link unavailable. Refresh this page or check the GitHub App configuration.</p>}</div>}</>
 }
 
 type RegistrationProps = { owner: 'personal' | 'organization'; organization: string; onOwner: (owner: 'personal' | 'organization') => void; onOrganization: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }
@@ -146,7 +166,14 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
   }
   const changeStep = (next: number) => { if (!lock.current) { setStep(next); setError(''); setManifest(null); setPrUrl(''); if (next < 2) setPlan(null) } }
   const refreshStatus = () => { if (!lock.current) { setError(''); setLoading(true); setRevision(value => value + 1) } }
+  const checkGitHubPermissions = () => void perform(async () => {
+    if (!status) return
+    await checkGitHubPermissionsAndRefresh(api, status, setStatus, () => {
+      setRepositories(null); setQuery(''); setRepository(null); setImageRepository(''); setPlan(null); setPrUrl('')
+    })
+  })
   const loadRepositories = async () => {
+    if (!readyForPublisherRepositories(status)) return
     const result = await api.repositories()
     setRepositories(result.repositories)
     // Discovery can change installation IDs or remove access. Never retain a stale approval.
@@ -181,7 +208,7 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
     setStatus(await api.status())
   })
   const advance = () => void perform(async () => {
-    if (step === 0) { await loadRepositories(); setStep(1) }
+    if (step === 0) { if (!readyForPublisherRepositories(status)) return; await loadRepositories(); setStep(1) }
     if (step === 1 && repository && !imageRepositoryProblem(imageRepository)) { const next = await api.plan(repository, imageRepository); setPlan(next); setStep(2) }
     if (step === 2 && prUrl && repository) {
       const next = await api.plan(repository, imageRepository); setPlan(next); setPrUrl('')
@@ -200,7 +227,7 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
   })
   const registered = !!(status?.tailnet.clientId && status.tailnet.audience && status.tailnet.tags)
   const available = status?.available === true
-  const readyForRepositories = available && status?.github.connected && registered
+  const readyForRepositories = readyForPublisherRepositories(status)
   const visible = repositories?.filter(item => item.fullName.toLowerCase().includes(query.toLowerCase())) ?? []
   const selectedConnection = status?.connections.find(item => item.id === connectionId)
   const workflowNeeded = canOpenWorkflowPlan(plan, repository, imageRepository)
@@ -212,12 +239,13 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
       {loading && <p className="publisher-loading" role="status">Loading publisher configuration…</p>}
       {!status && !loading && <section className="publisher-panel publisher-empty"><h2>Publishers couldn’t be loaded</h2><p>Check your connection and use Refresh to try again.</p></section>}
       {status && <>{!available && <div className="publisher-info publisher-warning" role="alert"><strong>Publisher setup is unavailable</strong>{status.reason || 'This server is not configured for publisher setup.'}</div>}
+        {step === null && <GitHubPermissionNotice github={status.github} busy={busy} onFinish={() => changeStep(0)} />}
         {step === null ? <><section className="publisher-panel"><div className="publisher-panel-head"><h2>Connected publishers</h2><span className="publisher-badge">{status.connections.length ? `${status.connections.length} configured` : 'No repositories connected'}</span></div><div className="publisher-intro"><div><p className="eyebrow">GITHUB → YOUR HOME SERVER</p><h2>Connect a repository.<br />Let the next publish announce itself.</h2><p>Services configures the existing publishing integration and verifies that GitHub Actions can reach this server. You approve the access and the exact configuration.</p><button className="button primary" disabled={busy || !available} onClick={() => changeStep(0)}>Connect GitHub repository →</button><div className="publisher-route"><span>GitHub Actions</span>→<span>Private Tailscale route</span>→<span>Services</span></div></div><aside className="publisher-summary"><h3>What this setup does</h3><ul><li>Creates a repository-scoped publisher key and transfers it directly to an Actions secret.</li><li>Reviews existing supported hooks or proposes a safe workflow diff in a setup PR when supported.</li><li>Tests real push connectivity without publishing an image.</li></ul><p>Publication notifications only.<br />Container updates still need your confirmation.</p></aside></div></section><div className="publisher-connections">{status.connections.map(connection => <PublisherConnection key={connection.id} connection={connection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} />)}</div></>
           : <section className="publisher-panel publisher-wizard" aria-label="Publisher setup"><ol className="publisher-steps">{steps.map((name, index) => <li key={name} className={index === step ? 'active' : index < step ? 'done' : ''} aria-current={index === step ? 'step' : undefined}><span>{index < step ? '✓' : index + 1}</span>{name}</li>)}<li className="publisher-aside">GitHub Actions pushes metadata to Services over your private Tailscale connection.<br /><br />No automatic container updates.</li></ol><div className="publisher-wizard-content"><fieldset className="publisher-controls" disabled={busy || !available} aria-label="Publisher setup controls"><div className="publisher-step-content">
             {step === 0 && <><h2>Authorize your connections</h2><p>These connections can be reused when you add another publisher.</p><div className="publisher-auth-row"><div><h3>GitHub App</h3><p>{status.github.connected ? status.github.name || 'Services GitHub App is connected.' : 'GitHub displays its own external consent screen. Review permissions and approve only the repositories you choose.'}</p></div>{status.github.connected ? <span className="publisher-badge good">Connected</span> : <span className="publisher-badge">Not connected</span>}</div>
               {!status.github.connected && <GitHubRegistration owner={registrationOwner} organization={organization} onOwner={next => { setRegistrationOwner(next); setManifest(null); setError('') }} onOrganization={next => { setOrganization(next); setManifest(null); setError('') }} onSubmit={event => { event.preventDefault(); startGitHub() }} />}
               {manifest && <section className="publisher-info"><h3>Continue on GitHub</h3><p>You will leave Services to create and approve the GitHub App. GitHub returns you to Publishers. You can then install the app on selected repositories.</p><details><summary>Review nonsecret GitHub App manifest</summary><pre>{manifest.manifest}</pre></details><GitHubManifestForm manifest={manifest} lockRef={lock} /><button className="button secondary" onClick={() => setManifest(null)}>Cancel GitHub handoff</button></section>}
-              {status.github.connected && <div className="publisher-info"><strong>Choose repository access on GitHub</strong><p>Install the app on the repositories you want to connect. After approving installation, return here and select a repository. Use Refresh repositories to discover newly granted access.</p>{status.github.installUrl && githubInstallUrl(status.github.installUrl) ? <a className="button secondary" href={status.github.installUrl} target="_blank" rel="noreferrer">Install on selected repositories ↗</a> : <p>Installation link unavailable. Refresh this page or check the GitHub App configuration.</p>}</div>}
+              <GitHubPermissions github={status.github} busy={busy} onCheck={checkGitHubPermissions} />
               <div className="publisher-auth-row"><div><h3>Private delivery · Tailscale</h3><p>Register an existing federated CI identity once. Services does not automatically provision your tailnet and never requests an OAuth secret.</p></div><span className={`publisher-badge ${registered ? 'good' : ''}`}>{registered ? 'Registered' : 'Not registered'}</span></div>
               <form className="publisher-tailnet" onSubmit={saveTailnet}><label>Federated client ID<input value={tailnet.clientId} onChange={event => setTailnet({ ...tailnet, clientId: event.target.value })} required autoComplete="off" /></label><label>Audience<input value={tailnet.audience} onChange={event => setTailnet({ ...tailnet, audience: event.target.value })} required autoComplete="off" /></label><label>Runner tags<input value={tailnet.tags} onChange={event => setTailnet({ ...tailnet, tags: event.target.value })} required placeholder="tag:services-publisher" autoComplete="off" /></label><button className="button secondary" type="submit">Register existing federation</button></form>
               <div className="publisher-info">A tailnet administrator must configure federation trust for this repository/ref and allow the runner tags to reach this server over HTTPS. Registering these values does not grant network access.</div></>}

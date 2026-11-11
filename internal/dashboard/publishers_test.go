@@ -30,6 +30,12 @@ type publisherProviderFake struct {
 func (f *publisherProviderFake) ExchangeManifest(context.Context, string) (githubapp.App, error) {
 	return githubapp.App{ID: 1, Slug: "services-test", Name: "Services", PEM: "private-app-key"}, nil
 }
+func (f *publisherProviderFake) CheckPermissions(context.Context, githubapp.App) (githubapp.PermissionStatus, error) {
+	return githubapp.PermissionStatus{VariablesWrite: true, SettingsURL: "https://github.com/settings/apps/services-test/permissions"}, nil
+}
+func (f *publisherProviderFake) VerifyRepositoryPermissions(context.Context, githubapp.App, githubapp.Repository) error {
+	return nil
+}
 func (f *publisherProviderFake) Repositories(context.Context, githubapp.App) ([]githubapp.Repository, error) {
 	return f.repositories, nil
 }

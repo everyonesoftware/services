@@ -23,6 +23,10 @@ import (
 type App struct {
 	ID              int64
 	Slug, Name, PEM string
+	// Permission metadata is a last-checked hint for the UI, never authorization.
+	PermissionsChecked bool
+	VariablesWrite     bool
+	SettingsURL        string
 }
 type Tailnet struct {
 	ClientID string `json:"clientId"`

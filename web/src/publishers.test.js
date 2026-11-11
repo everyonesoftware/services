@@ -10,6 +10,130 @@ const api = await server.ssrLoadModule('/src/publisherApi.ts').catch(() => ({}))
 const ui = await server.ssrLoadModule('/src/Publishers.tsx').catch(() => ({}))
 const repository = { id: 14, fullName: 'Acme/Website', defaultBranch: 'main', installationId: 8 }
 
+test('GitHub permission rechecks invalidate stale readiness and review before a failed request', async () => {
+  assert.equal(typeof api.checkGitHubPermissionsAndRefresh, 'function')
+  const current = { available: true, github: { connected: true, permissionsChecked: true, variablesWrite: true, settingsUrl: 'https://github.com/settings/apps/services/permissions' }, tailnet: { clientId: 'client', audience: 'audience', tags: 'tag:runner' }, connections: [] }
+  const statuses = [], events = []
+  const error = new Error('GitHub unavailable')
+  const client = { checkGitHubPermissions: async () => {
+    events.push('request')
+    assert.equal(api.readyForPublisherRepositories(statuses.at(-1)), false)
+    assert.deepEqual(events, ['invalidate', 'clear review', 'request'])
+    throw error
+  } }
+  await assert.rejects(api.checkGitHubPermissionsAndRefresh(client, current, status => { statuses.push(status); events.push('invalidate') }, () => events.push('clear review')), cause => cause === error)
+  assert.equal(statuses.length, 1)
+  assert.equal(statuses[0].github.settingsUrl, current.github.settingsUrl)
+  assert.equal(statuses[0].github.connected, true)
+  assert.equal(statuses[0].github.permissionsChecked, false)
+  assert.equal(statuses[0].github.variablesWrite, false)
+  assert.equal(current.github.variablesWrite, true, 'must not mutate retained snapshots')
+  const checked = { ...current, github: { ...current.github, variablesWrite: false } }
+  await api.checkGitHubPermissionsAndRefresh({ checkGitHubPermissions: async () => checked }, current, status => statuses.push(status), () => {})
+  assert.equal(statuses.at(-1), checked)
+})
+
+test('explicit GitHub permission check posts empty authenticated JSON and returns saved status', async () => {
+  const calls = []
+  const saved = { github: { connected: true, permissionsChecked: true, variablesWrite: false, settingsUrl: 'https://github.com/settings/apps/services/permissions' } }
+  const client = api.createPublisherApi(async (url, options) => { calls.push({ url, ...options }); return Response.json(saved) })
+  assert.equal(typeof client.checkGitHubPermissions, 'function')
+  assert.deepEqual(await client.checkGitHubPermissions(), saved)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/api/publishers/github/permissions')
+  assert.equal(calls[0].method, 'POST')
+  assert.equal(calls[0].body, '{}')
+  assert.equal(calls[0].credentials, 'same-origin')
+  assert.equal(calls[0].cache, 'no-store')
+  assert.equal(calls[0].headers['Content-Type'], 'application/json')
+  assert.ok(calls[0].signal instanceof AbortSignal)
+  for (const fetcher of [() => new Promise(() => {}), async () => ({ ok: true, json: () => new Promise(() => {}) })]) {
+    const bounded = api.createPublisherApi(fetcher, { timeoutMs: 15 })
+    await assert.rejects(bounded.checkGitHubPermissions(), error => error.name === 'PublisherRequestTimeout' && error.mutation)
+  }
+})
+
+test('repository readiness fails closed until an exact saved GitHub grant and federation are ready', () => {
+  assert.equal(typeof api.githubVariablesReady, 'function')
+  assert.equal(typeof api.readyForPublisherRepositories, 'function')
+  const github = { connected: true, permissionsChecked: true, variablesWrite: true }
+  const saved = { available: true, github, tailnet: { clientId: 'client', audience: 'audience', tags: 'tag:runner' } }
+  assert.equal(api.readyForPublisherRepositories(saved), true)
+  for (const change of [{ connected: false }, { permissionsChecked: undefined }, { permissionsChecked: false }, { variablesWrite: undefined }, { variablesWrite: false }, { permissionsChecked: 'true' }, { variablesWrite: 1 }]) {
+    assert.equal(api.githubVariablesReady({ ...github, ...change }), false)
+    assert.equal(api.readyForPublisherRepositories({ ...saved, github: { ...github, ...change } }), false)
+  }
+  assert.equal(api.readyForPublisherRepositories(null), false)
+  assert.equal(api.readyForPublisherRepositories({ ...saved, available: false }), false)
+  for (const field of ['clientId', 'audience', 'tags']) assert.equal(api.readyForPublisherRepositories({ ...saved, tailnet: { ...saved.tailnet, [field]: '' } }), false)
+})
+
+test('GitHub App permissions settings links accept only exact personal or organization destinations', () => {
+  assert.equal(typeof api.githubPermissionsUrl, 'function')
+  for (const url of ['https://github.com/settings/apps/services-publisher/permissions', 'https://github.com/organizations/Acme-Org/settings/apps/services-publisher/permissions']) assert.equal(api.githubPermissionsUrl(url), true, url)
+  for (const url of ['', 'javascript:alert(1)', 'http://github.com/settings/apps/services/permissions', 'https://github.com.evil.test/settings/apps/services/permissions', 'https://user@github.com/settings/apps/services/permissions', 'https://github.com:443/settings/apps/services/permissions', 'https://github.com/settings/apps/services/permissions?x=1', 'https://github.com/settings/apps/services/permissions#hash', 'https://github.com/settings/apps/services/permissions?', 'https://github.com/settings/apps/services/permissions#', 'https://github.com/settings/apps/services/permissions/', 'https://github.com/settings/apps/../services/permissions', 'https://github.com/settings/apps/other/../services/permissions', 'https://github.com/settings/apps/%73ervices/permissions', 'https://github.com/organizations/%41cme/settings/apps/services/permissions', 'https://github.com/organizations/Acme/settings/apps/services%2fother/permissions', 'https://github.com/settings/apps/services\\\\permissions', ' https://github.com/settings/apps/services/permissions', 'https://github.com/settings/apps/services/permissions\n']) assert.equal(api.githubPermissionsUrl(url), false, url)
+})
+
+test('one-time GitHub Variables step distinguishes unchecked, missing and verified grants before installation', () => {
+  assert.equal(typeof ui.GitHubPermissions, 'function')
+  const github = { connected: true, installUrl: 'https://github.com/apps/services/installations/new', settingsUrl: 'https://github.com/settings/apps/services/permissions' }
+  const render = (change = {}, busy = false) => renderToStaticMarkup(createElement(ui.GitHubPermissions, { github: { ...github, ...change }, busy, onCheck() {} }))
+  const unchecked = render()
+  for (const text of ['One-time GitHub Variables permission', 'Permissions &amp; events', 'Repository permissions', 'Variables', 'Read and write', 'Save', 'cannot request', 'manifest', 'Configure', 'existing installation', 'Check GitHub permissions', 'not been checked']) assert.ok(unchecked.includes(text), text)
+  assert.match(unchecked, /href="https:\/\/github.com\/settings\/apps\/services\/permissions"/)
+  assert.doesNotMatch(unchecked, /href="[^"]*installations/)
+  assert.match(render({ permissionsChecked: true, variablesWrite: false }), /Variables write permission is missing/)
+  assert.match(render({ permissionsChecked: true }), /not been checked/)
+  const verified = render({ permissionsChecked: true, variablesWrite: true })
+  assert.match(verified, /Variables write permission verified/)
+  assert.match(verified, /href="https:\/\/github.com\/apps\/services\/installations\/new"/)
+  assert.ok(verified.indexOf('One-time GitHub Variables') < verified.indexOf('Install on selected repositories'))
+  assert.match(verified, /installation.*fresh|fresh.*installation/)
+  for (const settingsUrl of [undefined, 'https://evil.test/settings/apps/services/permissions', 'https://github.com/settings/apps/services/permissions?redirect=evil']) {
+    const html = render({ settingsUrl })
+    assert.match(html, /Check permissions to load settings link/)
+    assert.doesNotMatch(html, /href=/)
+  }
+  assert.match(render({ settingsUrl: 'https://github.com/organizations/Acme/settings/apps/services/permissions' }), /href="https:\/\/github.com\/organizations\/Acme\/settings\/apps\/services\/permissions"/)
+  assert.match(render({}, true), /<button[^>]*disabled/)
+  assert.doesNotMatch(render({}, true), /href=/)
+  const calls = []
+  const tree = ui.GitHubPermissions({ github, busy: false, onCheck: () => calls.push('check') })
+  const elements = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(elements) : [node, ...elements(node.props?.children)]
+  assert.deepEqual(calls, [])
+  elements(tree).find(node => node.type === 'button' && node.props.children === 'Check GitHub permissions').props.onClick()
+  assert.deepEqual(calls, ['check'])
+  assert.equal(ui.GitHubPermissions({ github: { connected: false }, busy: false, onCheck() {} }), null)
+})
+
+test('registration return exposes pending permission setup on the main page without guessing a link', () => {
+  assert.equal(typeof ui.GitHubPermissionNotice, 'function')
+  const calls = []
+  const props = { github: { connected: true }, busy: false, onFinish: () => calls.push('step0') }
+  const html = renderToStaticMarkup(createElement(ui.GitHubPermissionNotice, props))
+  assert.match(html, /GitHub App permission setup is pending/)
+  assert.match(html, /Finish GitHub permission setup/)
+  assert.doesNotMatch(html, /href=/)
+  const tree = ui.GitHubPermissionNotice(props)
+  tree.props.children.find(node => node.type === 'button').props.onClick()
+  assert.deepEqual(calls, ['step0'])
+  assert.match(renderToStaticMarkup(createElement(ui.GitHubPermissionNotice, { ...props, busy: true })), /<button[^>]*disabled/)
+  for (const github of [{ connected: false }, { connected: true, permissionsChecked: true, variablesWrite: true }]) assert.equal(ui.GitHubPermissionNotice({ ...props, github }), null)
+})
+
+test('wizard wires explicit permission checking through the shared lock and invalidates stale repository reviews', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('./Publishers.tsx', import.meta.url), 'utf8')
+  assert.match(source, /const checkGitHubPermissions = \(\) => void perform\(async \(\) => \{\s*if \(!status\) return\s*await checkGitHubPermissionsAndRefresh\(api, status, setStatus,/)
+  assert.match(source, /checkGitHubPermissionsAndRefresh\(api, status, setStatus, \(\) => \{[^}]*setRepositories\(null\)[^}]*setRepository\(null\)[^}]*setImageRepository\(''\)[^}]*setPlan\(null\)[^}]*setPrUrl\(''\)/)
+  assert.match(source, /const readyForRepositories = readyForPublisherRepositories\(status\)/)
+  assert.match(source, /<GitHubPermissions github=\{status\.github\} busy=\{busy\} onCheck=\{checkGitHubPermissions\}/)
+  assert.match(source, /<GitHubPermissionNotice github=\{status\.github\} busy=\{busy\} onFinish=\{\(\) => changeStep\(0\)\}/)
+  assert.match(source, /const loadRepositories = async \(\) => \{\s*if \(!readyForPublisherRepositories\(status\)\) return/)
+  assert.match(source, /if \(step === 0\) \{ if \(!readyForPublisherRepositories\(status\)\) return;/)
+  assert.equal((source.match(/checkGitHubPermissionsAndRefresh\(api, status, setStatus/g) || []).length, 1, 'only the explicit check action refreshes permission metadata')
+})
+
 test('every publisher API operation supplies an abortable bounded request', async () => {
   const signals = []
   const client = api.createPublisherApi(async (_url, options) => { signals.push(options.signal); return Response.json({}) })

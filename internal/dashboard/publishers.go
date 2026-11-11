@@ -22,6 +22,8 @@ import (
 
 type publisherProvider interface {
 	ExchangeManifest(context.Context, string) (githubapp.App, error)
+	CheckPermissions(context.Context, githubapp.App) (githubapp.PermissionStatus, error)
+	VerifyRepositoryPermissions(context.Context, githubapp.App, githubapp.Repository) error
 	Repositories(context.Context, githubapp.App) ([]githubapp.Repository, error)
 	Inspect(context.Context, githubapp.App, githubapp.Repository) (githubapp.Inspection, error)
 	Configure(context.Context, githubapp.App, githubapp.Repository, string, map[string]string) error
@@ -68,6 +70,7 @@ func (s *Server) registerPublisherRoutes() {
 	s.mux.HandleFunc("GET /api/publishers", s.publisherStatus)
 	s.mux.HandleFunc("POST /api/publishers/github/start", s.publisherGitHubStart)
 	s.mux.HandleFunc("POST /api/publishers/github/complete", s.publisherGitHubComplete)
+	s.mux.HandleFunc("POST /api/publishers/github/permissions", s.publisherGitHubPermissions)
 	s.mux.HandleFunc("PUT /api/publishers/tailnet", s.publisherTailnet)
 	s.mux.HandleFunc("GET /api/publishers/repositories", s.publisherRepositories)
 	s.mux.HandleFunc("POST /api/publishers/plan", s.publisherPlan)
@@ -184,6 +187,9 @@ func (s *Server) publisherStatus(w http.ResponseWriter, r *http.Request) {
 	if state.App.ID > 0 {
 		gh["name"] = state.App.Name
 		gh["installUrl"] = "https://github.com/apps/" + url.PathEscape(state.App.Slug) + "/installations/new"
+		gh["permissionsChecked"] = state.App.PermissionsChecked
+		gh["variablesWrite"] = state.App.VariablesWrite
+		gh["settingsUrl"] = state.App.SettingsURL
 	}
 	authJSON(w, 200, map[string]any{"available": true, "github": gh, "tailnet": state.Tailnet, "endpoint": m.endpoint, "connections": views})
 }
@@ -225,7 +231,9 @@ func (s *Server) publisherGitHubStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	origin := strings.TrimSuffix(m.endpoint, "/api/images/published")
-	manifest := map[string]any{"name": "Services publisher " + token[:8], "url": origin, "redirect_url": origin + "/github-app-callback", "public": false, "hook_attributes": map[string]any{"url": origin + "/github-events", "active": false}, "default_permissions": map[string]string{"actions": "write", "contents": "write", "workflows": "write", "pull_requests": "write", "secrets": "write", "variables": "write", "metadata": "read"}, "default_events": []string{}}
+	// GitHub rejects Variables in manifests; grant it after App registration.
+	// Setup verifies both the App grant and installation access before writes.
+	manifest := map[string]any{"name": "Services publisher " + token[:8], "url": origin, "redirect_url": origin + "/github-app-callback", "public": false, "hook_attributes": map[string]any{"url": origin + "/github-events", "active": false}, "default_permissions": map[string]string{"actions": "write", "contents": "write", "workflows": "write", "pull_requests": "write", "secrets": "write", "metadata": "read"}, "default_events": []string{}}
 	data, _ := json.Marshal(manifest)
 	action := "https://github.com/settings/apps/new"
 	if body.Organization != "" {
@@ -278,7 +286,13 @@ func (s *Server) publisherGitHubComplete(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Cannot persist GitHub App credentials. Registration was not completed locally.", 503)
 		return
 	}
-	authJSON(w, 200, map[string]bool{"connected": true})
+	// Credentials are durable. A failed permission lookup must not require
+	// exchanging the single-use registration code again.
+	if err = m.refreshAppPermissions(ctx, &state); err != nil {
+		authJSON(w, 200, map[string]bool{"connected": true, "permissionsChecked": false})
+		return
+	}
+	authJSON(w, 200, map[string]bool{"connected": true, "permissionsChecked": true})
 }
 
 // The landing page has no session exception. A same-origin POST after navigation
@@ -371,6 +385,10 @@ func (s *Server) publisherRepositories(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
+	if err = m.requireAppPermissions(ctx, &state); err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
 	repos, err := m.provider.Repositories(ctx, appCredentials(state.App))
 	if err != nil {
 		http.Error(w, "Cannot list GitHub repositories. Check App installation and permissions.", 502)
@@ -388,12 +406,15 @@ type publisherSetupRequest struct {
 	Approval        string               `json:"approval,omitempty"`
 }
 
-func (m *publisherIntegration) resolve(ctx context.Context, state publishers.Snapshot, input publisherSetupRequest) (githubapp.Repository, error) {
+func (m *publisherIntegration) resolve(ctx context.Context, state *publishers.Snapshot, input publisherSetupRequest) (githubapp.Repository, error) {
 	if state.App.ID == 0 || !validTailnet(state.Tailnet) {
 		return githubapp.Repository{}, errors.New("Connect GitHub and register Tailscale federation first")
 	}
 	if len(input.ImageRepository) > 255 || !publicationRepository.MatchString(input.ImageRepository) {
 		return githubapp.Repository{}, errors.New("An exact untagged lowercase GHCR image repository is required")
+	}
+	if err := m.requireAppPermissions(ctx, state); err != nil {
+		return githubapp.Repository{}, err
 	}
 	repos, err := m.provider.Repositories(ctx, appCredentials(state.App))
 	if err != nil {
@@ -401,6 +422,9 @@ func (m *publisherIntegration) resolve(ctx context.Context, state publishers.Sna
 	}
 	for _, repo := range repos {
 		if repo == input.Repository {
+			if err := m.provider.VerifyRepositoryPermissions(ctx, appCredentials(state.App), repo); err != nil {
+				return githubapp.Repository{}, err
+			}
 			return repo, nil
 		}
 	}
@@ -427,7 +451,7 @@ func (s *Server) publisherPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	repo, err := m.resolve(ctx, state, input)
+	repo, err := m.resolve(ctx, &state, input)
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return
@@ -469,7 +493,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	repo, err := m.resolve(ctx, state, input)
+	repo, err := m.resolve(ctx, &state, input)
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return

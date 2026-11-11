@@ -65,7 +65,7 @@ func (s *Server) publisherInstallWorkflow(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	repo, err := m.resolve(ctx, state, publisherSetupRequest{Repository: input.Repository, ImageRepository: input.ImageRepository})
+	repo, err := m.resolve(ctx, &state, publisherSetupRequest{Repository: input.Repository, ImageRepository: input.ImageRepository})
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return
