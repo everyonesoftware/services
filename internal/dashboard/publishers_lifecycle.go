@@ -118,7 +118,11 @@ func (s *Server) publisherAction(w http.ResponseWriter, r *http.Request, action 
 				http.Error(w, "Configuration recovery is unavailable", 503)
 				return
 			}
-			if err = provider.RecoverConfiguration(ctx, appCredentials(state.App), providerRepository(c.Repository), c.Secret, m.variables(state)); err != nil {
+			if !validTailnet(repositoryTailnet(state, c.Repository.ID)) {
+				http.Error(w, "Register Tailscale federation for this repository before recovery", 409)
+				return
+			}
+			if err = provider.RecoverConfiguration(ctx, appCredentials(state.App), providerRepository(c.Repository), c.Secret, m.variables(state, providerRepository(c.Repository))); err != nil {
 				http.Error(w, "Recovery could not reconcile existing configuration. No existing secret was overwritten.", 409)
 				return
 			}

@@ -72,7 +72,9 @@ func TestPublisherRejectsStaleConfigurationApproval(t *testing.T) {
 	}
 	json.Unmarshal(w.Body.Bytes(), &plan)
 	state, _ := store.Load()
-	state.Tailnet.Audience = "changed-audience"
+	tailnet := state.Tailnets["12"]
+	tailnet.Audience = "changed-audience"
+	state.Tailnets["12"] = tailnet
 	if err := store.Save(state); err != nil {
 		t.Fatal(err)
 	}

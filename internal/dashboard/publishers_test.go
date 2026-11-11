@@ -75,7 +75,7 @@ func publisherServer(t *testing.T) (*Server, *auth.Store, *publishers.Store, *pu
 	if err = s.ConfigurePublishers(store, provider); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.Save(publishers.Snapshot{App: publishers.App{ID: 1, Slug: "services-test", Name: "Services", PEM: "private-app-key"}, Tailnet: publishers.Tailnet{ClientID: "client-id", Audience: "audience", Tags: "tag:publisher"}, Connections: []publishers.Connection{}}); err != nil {
+	if err = store.Save(publishers.Snapshot{App: publishers.App{ID: 1, Slug: "services-test", Name: "Services", PEM: "private-app-key"}, Tailnet: publishers.Tailnet{ClientID: "client-id", Audience: "audience", Tags: "tag:publisher"}, Tailnets: map[string]publishers.Tailnet{"12": {ClientID: "client-id", Audience: "audience", Tags: "tag:publisher"}}, Connections: []publishers.Connection{}}); err != nil {
 		t.Fatal(err)
 	}
 	return s, authStore, store, provider, cookie

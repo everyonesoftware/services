@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +73,7 @@ func (s *Server) registerPublisherRoutes() {
 	s.mux.HandleFunc("POST /api/publishers/github/complete", s.publisherGitHubComplete)
 	s.mux.HandleFunc("POST /api/publishers/github/permissions", s.publisherGitHubPermissions)
 	s.mux.HandleFunc("PUT /api/publishers/tailnet", s.publisherTailnet)
+	s.mux.HandleFunc("POST /api/publishers/tailnet/guidance", s.publisherTailnetGuidance)
 	s.mux.HandleFunc("GET /api/publishers/repositories", s.publisherRepositories)
 	s.mux.HandleFunc("POST /api/publishers/plan", s.publisherPlan)
 	s.mux.HandleFunc("POST /api/publishers/workflow", s.publisherInstallWorkflow)
@@ -132,7 +134,7 @@ func (s *Server) publisherStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	m := s.publishers
 	if m == nil {
-		authJSON(w, 200, map[string]any{"available": false, "reason": "Configure an HTTPS SERVICES_PUBLIC_ORIGIN and persistent SERVICES_DATA_DIR with publication ingestion available.", "github": map[string]bool{"connected": false}, "tailnet": publishers.Tailnet{}, "endpoint": "", "connections": []publisherConnectionView{}})
+		authJSON(w, 200, map[string]any{"available": false, "reason": "Configure an HTTPS SERVICES_PUBLIC_ORIGIN and persistent SERVICES_DATA_DIR with publication ingestion available.", "github": map[string]bool{"connected": false}, "tailnet": publishers.Tailnet{}, "tailnets": map[string]publishers.Tailnet{}, "endpoint": "", "connections": []publisherConnectionView{}})
 		return
 	}
 	m.mu.Lock()
@@ -191,7 +193,10 @@ func (s *Server) publisherStatus(w http.ResponseWriter, r *http.Request) {
 		gh["variablesWrite"] = state.App.VariablesWrite
 		gh["settingsUrl"] = state.App.SettingsURL
 	}
-	authJSON(w, 200, map[string]any{"available": true, "github": gh, "tailnet": state.Tailnet, "endpoint": m.endpoint, "connections": views})
+	if state.Tailnets == nil {
+		state.Tailnets = map[string]publishers.Tailnet{}
+	}
+	authJSON(w, 200, map[string]any{"available": true, "github": gh, "tailnet": state.Tailnet, "tailnets": state.Tailnets, "endpoint": m.endpoint, "connections": views})
 }
 func (s *Server) publisherGitHubStart(w http.ResponseWriter, r *http.Request) {
 	m, ok := s.publisherAdmin(w, r)
@@ -339,25 +344,46 @@ func (s *Server) publisherTailnet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input publishers.Tailnet
+	var input struct {
+		publishers.Tailnet
+		Repository *githubapp.Repository `json:"repository,omitempty"`
+	}
 	if !authDecode(w, r, &input) {
 		return
 	}
-	if !validTailnet(input) {
+	if !validTailnet(input.Tailnet) {
 		http.Error(w, "Client ID, audience, and comma-separated Tailscale tags are required (no spaces)", 400)
 		return
 	}
 	m.mu.Lock()
 	state, err := m.store.Load()
 	if err == nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		if input.Repository != nil {
+			if _, accessErr := m.resolveRepository(ctx, &state, *input.Repository); accessErr != nil {
+				m.mu.Unlock()
+				http.Error(w, accessErr.Error(), 403)
+				return
+			}
+		}
 		for _, c := range state.Connections {
-			if c.Configured && state.Tailnet != input {
+			// Legacy trust is frozen for all saved connections. Scoped trust is
+			// frozen while a live connection (including interrupted setup) owns it.
+			if (input.Repository == nil && state.Tailnet != input.Tailnet) || (input.Repository != nil && (c.State != "disconnected" || c.Configured) && c.Repository.ID == input.Repository.ID && repositoryTailnet(state, c.Repository.ID) != input.Tailnet) {
 				m.mu.Unlock()
 				http.Error(w, "Existing publishers use these settings. Reconfiguration is not yet supported.", 409)
 				return
 			}
 		}
-		state.Tailnet = input
+		if input.Repository == nil {
+			state.Tailnet = input.Tailnet
+		} else {
+			if state.Tailnets == nil {
+				state.Tailnets = map[string]publishers.Tailnet{}
+			}
+			state.Tailnets[strconv.FormatInt(input.Repository.ID, 10)] = input.Tailnet
+		}
 		err = m.store.Save(state)
 	}
 	m.mu.Unlock()
@@ -407,11 +433,18 @@ type publisherSetupRequest struct {
 }
 
 func (m *publisherIntegration) resolve(ctx context.Context, state *publishers.Snapshot, input publisherSetupRequest) (githubapp.Repository, error) {
-	if state.App.ID == 0 || !validTailnet(state.Tailnet) {
+	if state.App.ID == 0 || !validTailnet(repositoryTailnet(*state, input.Repository.ID)) {
 		return githubapp.Repository{}, errors.New("Connect GitHub and register Tailscale federation first")
 	}
 	if len(input.ImageRepository) > 255 || !publicationRepository.MatchString(input.ImageRepository) {
 		return githubapp.Repository{}, errors.New("An exact untagged lowercase GHCR image repository is required")
+	}
+	return m.resolveRepository(ctx, state, input.Repository)
+}
+
+func (m *publisherIntegration) resolveRepository(ctx context.Context, state *publishers.Snapshot, input githubapp.Repository) (githubapp.Repository, error) {
+	if state.App.ID == 0 {
+		return githubapp.Repository{}, errors.New("Connect and install the GitHub App first")
 	}
 	if err := m.requireAppPermissions(ctx, state); err != nil {
 		return githubapp.Repository{}, err
@@ -421,7 +454,7 @@ func (m *publisherIntegration) resolve(ctx context.Context, state *publishers.Sn
 		return githubapp.Repository{}, errors.New("Cannot verify GitHub repository access")
 	}
 	for _, repo := range repos {
-		if repo == input.Repository {
+		if repo == input {
 			if err := m.provider.VerifyRepositoryPermissions(ctx, appCredentials(state.App), repo); err != nil {
 				return githubapp.Repository{}, err
 			}
@@ -430,8 +463,24 @@ func (m *publisherIntegration) resolve(ctx context.Context, state *publishers.Sn
 	}
 	return githubapp.Repository{}, errors.New("Repository or installation is not currently authorized; refresh the repository list")
 }
-func (m *publisherIntegration) variables(state publishers.Snapshot) map[string]string {
-	return map[string]string{"SERVICES_PUBLISH_URL": m.endpoint, "SERVICES_PUBLISH_NOTIFICATIONS": "false", "TAILSCALE_CLIENT_ID": state.Tailnet.ClientID, "TAILSCALE_AUDIENCE": state.Tailnet.Audience, "TAILSCALE_TAGS": state.Tailnet.Tags}
+
+// The global value predates repository scoping. Only a saved connection may
+// inherit it; merely discovering or selecting another repository grants nothing.
+func repositoryTailnet(state publishers.Snapshot, repositoryID int64) publishers.Tailnet {
+	if t, ok := state.Tailnets[strconv.FormatInt(repositoryID, 10)]; ok {
+		return t
+	}
+	for _, c := range state.Connections {
+		if c.Repository.ID == repositoryID {
+			return state.Tailnet
+		}
+	}
+	return publishers.Tailnet{}
+}
+
+func (m *publisherIntegration) variables(state publishers.Snapshot, repo githubapp.Repository) map[string]string {
+	t := repositoryTailnet(state, repo.ID)
+	return map[string]string{"SERVICES_PUBLISH_URL": m.endpoint, "SERVICES_PUBLISH_NOTIFICATIONS": "false", "TAILSCALE_CLIENT_ID": t.ClientID, "TAILSCALE_AUDIENCE": t.Audience, "TAILSCALE_TAGS": t.Tags}
 }
 func (s *Server) publisherPlan(w http.ResponseWriter, r *http.Request) {
 	m, ok := s.publisherAdmin(w, r)
@@ -469,7 +518,7 @@ func (s *Server) publisherPlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot prepare a workflow plan", 502)
 		return
 	}
-	response := map[string]any{"supported": inspection.Supported, "problems": inspection.Problems, "repository": repo, "imageRepository": input.ImageRepository, "variables": m.variables(state), "secretName": "SERVICES_PUBLISH_TOKEN", "approval": publisherApproval(repo, input.ImageRepository, m.variables(state), workflow)}
+	response := map[string]any{"supported": inspection.Supported, "problems": inspection.Problems, "repository": repo, "imageRepository": input.ImageRepository, "variables": m.variables(state, repo), "secretName": "SERVICES_PUBLISH_TOKEN", "approval": publisherApproval(repo, input.ImageRepository, m.variables(state, repo), workflow)}
 	if workflow != nil {
 		response["workflow"] = workflow
 	}
@@ -522,7 +571,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot verify the reviewed workflow", 502)
 		return
 	}
-	if input.Approval != publisherApproval(repo, input.ImageRepository, m.variables(state), workflow) {
+	if input.Approval != publisherApproval(repo, input.ImageRepository, m.variables(state, repo), workflow) {
 		http.Error(w, "Configuration changed or was not reviewed. Review setup again before applying.", 409)
 		return
 	}
@@ -546,7 +595,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot persist publisher setup", 503)
 		return
 	}
-	if err = m.provider.Configure(ctx, appCredentials(state.App), repo, secret, m.variables(state)); err != nil {
+	if err = m.provider.Configure(ctx, appCredentials(state.App), repo, secret, m.variables(state, repo)); err != nil {
 		state.Connections[index].State = "error"
 		state.Connections[index].Error = "GitHub provisioning was not completed. Recover setup to reconcile missing configuration without overwriting existing values."
 		if errors.Is(err, githubapp.ErrConflict) {

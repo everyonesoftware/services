@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, RefObject } from 'react'
 import { applyAndRefresh, awaitingCallback, canApplyPlan, canOpenWorkflowPlan, checkGitHubPermissionsAndRefresh, createPublisherApi, githubInstallUrl, githubManifestAction, githubPermissionsUrl, githubPullRequestUrl, githubRunUrl, githubVariablesReady, imageRepositoryProblem, readyForPublisherRepositories, refreshAfterPublisherTimeout } from './publisherApi.ts'
-import type { Connection, GitHubStart, PublisherPlan, PublisherStatus, Repository } from './publisherApi.ts'
+import type { Connection, GitHubStart, PublisherPlan, PublisherStatus, Repository, Tailnet, TailnetGuidance } from './publisherApi.ts'
 import type { AuthUser } from './authApi.ts'
 import './Publishers.css'
 
@@ -19,7 +19,19 @@ export function AppNavigation({ active, onMonitor, onPublishers, onAccounts, dis
 const api = createPublisherApi()
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed. Please try again.'
 const dateLabel = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : 'Not available'
-const steps = ['Connections', 'Repository', 'Review setup', 'Verify push']
+const steps = ['GitHub App', 'Repository', 'Tailscale', 'Review setup', 'Verify push']
+
+export function PublisherTailscale({ repository, guidance, tailnet, endpoint, busy, onChange, onReload }: { repository: Repository; guidance: TailnetGuidance | null; tailnet: Tailnet; endpoint: string; busy: boolean; onChange: (value: Tailnet) => void; onReload: () => void }) {
+  return <><h2>Set up Tailscale for {repository.fullName}</h2><p>Create a dedicated trust credential for this repository. Do not reuse a credential restricted to another repository.</p>
+    <section className="publisher-info publisher-tailnet-guide" aria-label="Create repository trust credential"><h3>1. Create a federated identity</h3><p>A tailnet administrator must complete these steps. Services cannot create trust credentials or change your network policy.</p><a className="button secondary" href="https://login.tailscale.com/admin/settings/trust-credentials" target="_blank" rel="noreferrer">Open Tailscale trust credentials ↗</a>
+      <ol><li>Select <b>Credential → OpenID Connect</b> (federated identity). Name it for <b>{repository.fullName}</b>.</li><li>Select <b>GitHub Actions</b> as the issuer, or choose <b>Custom issuer</b> and paste the issuer URL below. Paste the exact subject below; it is read from GitHub for this repository’s default branch, not guessed from its name.</li><li>Under <b>Keys → Auth Keys → Write</b>, authorize the runner tag, for example <code>tag:services-publisher</code>. Select <b>Generate credential</b>.</li><li>Copy its <b>Client ID</b> and <b>Audience</b> into the fields below. Use the audience shown by Tailscale exactly; do not add <code>https://</code>.</li></ol>
+      {guidance ? <><dl className="publisher-facts"><div><dt>Issuer</dt><dd><code>{guidance.issuer}</code></dd></div><div><dt>Subject · {repository.defaultBranch}</dt><dd>{guidance.subject ? <code>{guidance.subject}</code> : <span role="alert">{guidance.subjectError || 'GitHub subject could not be determined. Review the repository OIDC settings before continuing.'}</span>}</dd></div></dl><p>These values cover default-branch jobs without a GitHub environment. Environment, release-tag, or custom subject contexts need a separately reviewed trust rule; do not broaden the subject to a wildcard.</p></> : <p role="status">Load the repository’s current GitHub identity before creating the credential.</p>}
+      <button className="button secondary" type="button" disabled={busy} onClick={onReload}>Refresh GitHub identity</button><p><a href="https://tailscale.com/docs/features/workload-identity-federation" target="_blank" rel="noreferrer">Workload identity federation instructions ↗</a> · <a href="https://tailscale.com/docs/integrations/github/github-action" target="_blank" rel="noreferrer">GitHub Action setup ↗</a></p>
+    </section>
+    <section className="publisher-info publisher-tailnet-guide"><h3>2. Allow private HTTPS delivery</h3><p>In your tailnet policy, allow only the authorized runner tag to reach this Services server over HTTPS. Credential scopes allow joining the tailnet; they do not grant network access.</p><p>Destination: <code>{endpoint}</code>. Use the HTTPS host and port from this URL in your rule, not the API path.</p><a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noreferrer">Open Tailscale access controls ↗</a></section>
+    <h3 className="publisher-tailnet-heading">3. Save this repository’s credential</h3><div className="publisher-tailnet"><label>Client ID<input value={tailnet.clientId} onChange={event => onChange({ ...tailnet, clientId: event.target.value })} required autoComplete="off" spellCheck={false} placeholder="Copy from the new trust credential" /></label><label>Audience<input value={tailnet.audience} onChange={event => onChange({ ...tailnet, audience: event.target.value })} required autoComplete="off" spellCheck={false} placeholder="Copy the exact Tailscale audience" /></label><label>Runner tags<input value={tailnet.tags} onChange={event => onChange({ ...tailnet, tags: event.target.value })} required placeholder="tag:services-publisher" autoComplete="off" spellCheck={false} /></label></div>
+    <p className="publisher-muted">Save &amp; review stores these nonsecret values only for {repository.fullName}. Access is not verified until the runner sends an authenticated connection proof.</p><details className="publisher-info"><summary>If the test fails with 403</summary><p>Open the credential linked in the workflow error and inspect its latest token exchange error. Check subject, audience, and custom claim rules first. A subject naming another repository cannot authorize this one.</p></details></>
+}
 
 export function GitHubManifestForm({ manifest, lockRef }: { manifest: GitHubStart; lockRef: RefObject<boolean> }) {
   return <form action={manifest.action} method="post" onSubmit={event => {
@@ -40,7 +52,7 @@ export function GitHubRepositoryAccess({ github, busy }: { github: PublisherStat
   return <section className="publisher-info" aria-label="GitHub App repository access"><strong>Install or manage repository access</strong>
     <p>Start from the GitHub App installation page—not from your repository list.</p>
     <ol><li>Open the installation page below and choose the account that owns your repositories.</li><li>Choose <b>Only select repositories</b> and select each repository that publishes an image.</li><li>Review access and click <b>Install</b>. If already installed, choose <b>Configure</b>, update repository access, and click <b>Save</b>.</li><li>Return to Services and click <b>Refresh repositories</b>, then select a repository to continue.</li></ol>
-    {installUrl ? !busy && <a className="button secondary" href={installUrl} target="_blank" rel="noreferrer">Install on selected repositories ↗</a> : <p>Installation link unavailable. Go Back to Connections and look for Install on selected repositories after checking GitHub permissions.</p>}
+    {installUrl ? !busy && <a className="button secondary" href={installUrl} target="_blank" rel="noreferrer">Install on selected repositories ↗</a> : <p>Installation link unavailable. Go Back to GitHub App and look for Install on selected repositories after checking GitHub permissions.</p>}
     <p>For organization repositories, an organization owner may need to approve access. A private App must belong to that organization.</p>
   </section>
 }
@@ -112,7 +124,7 @@ export function PublisherConfirmation({ connection, action, busy, error, onCance
 
 type FooterProps = { step: number; busy: boolean; available: boolean; canAdvance: boolean; workflowNeeded: boolean; pendingWorkflow: boolean; onBack: () => void; onAdvance: () => void; onCancel: () => void }
 export function PublisherFooter({ step, busy, available, canAdvance, workflowNeeded, pendingWorkflow, onBack, onAdvance, onCancel }: FooterProps) {
-  return <footer className="publisher-footer"><button className="button secondary" disabled={busy} onClick={onBack}>{step === 0 ? 'Cancel' : step === 3 ? 'Back to publishers' : 'Back'}</button><p>{busy ? 'Please wait…' : step === 0 ? 'Authorize both connections to continue.' : step === 2 ? pendingWorkflow ? 'Merge on GitHub, then request a fresh review. No merge polling.' : workflowNeeded ? 'Only the setup PR is created. Merge and review before applying.' : 'Only this explicit action changes GitHub repository configuration.' : step === 3 ? 'Saved state from Services, not GitHub publication polling.' : 'Review before making any changes.'}</p>{step !== 3 && <button className="button primary" disabled={busy || !available || !canAdvance} onClick={onAdvance}>{step === 0 ? 'Select repository →' : step === 1 ? 'Review setup →' : pendingWorkflow ? 'Review again →' : workflowNeeded ? 'Open setup PR ↗' : 'Apply & test push'}</button>}{step !== 0 && step !== 3 && <button className="publisher-cancel" disabled={busy} onClick={onCancel}>Cancel setup</button>}</footer>
+  return <footer className="publisher-footer"><button className="button secondary" disabled={busy} onClick={onBack}>{step === 0 ? 'Cancel' : step === 4 ? 'Back to publishers' : 'Back'}</button><p>{busy ? 'Please wait…' : step === 0 ? 'Approve the GitHub App before selecting a repository.' : step === 2 ? 'Save federation settings for this repository only.' : step === 3 ? pendingWorkflow ? 'Merge on GitHub, then request a fresh review. No merge polling.' : workflowNeeded ? 'Only the setup PR is created. Merge and review before applying.' : 'Only this explicit action changes GitHub repository configuration.' : step === 4 ? 'Saved state from Services, not GitHub publication polling.' : 'Review before making any changes.'}</p>{step !== 4 && <button className="button primary" disabled={busy || !available || !canAdvance} onClick={onAdvance}>{step === 0 ? 'Select repository →' : step === 1 ? 'Set up Tailscale →' : step === 2 ? 'Save & review →' : pendingWorkflow ? 'Review again →' : workflowNeeded ? 'Open setup PR ↗' : 'Apply & test push'}</button>}{step !== 0 && step !== 4 && <button className="publisher-cancel" disabled={busy} onClick={onCancel}>Cancel setup</button>}</footer>
 }
 
 type Props = { user: AuthUser; onBack: () => void; onAccounts: () => void; onLogout: () => void }
@@ -127,6 +139,8 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
   const [registrationOwner, setRegistrationOwner] = useState<'personal' | 'organization'>('personal')
   const [organization, setOrganization] = useState('')
   const [tailnet, setTailnet] = useState({ clientId: '', audience: '', tags: '' })
+  const hydratedTailnetRepository = useRef<Repository | null>(null)
+  const [guidance, setGuidance] = useState<TailnetGuidance | null>(null)
   const [repositories, setRepositories] = useState<Repository[] | null>(null)
   const [query, setQuery] = useState('')
   const [repository, setRepository] = useState<Repository | null>(null)
@@ -141,7 +155,7 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
     let active = true
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), 12_000)
-    void api.status(controller.signal).then(next => { if (active) { setStatus(next); setTailnet(next.tailnet); setError('') } }).catch(cause => { if (active) setError(errorMessage(cause)) }).finally(() => { if (active) setLoading(false); window.clearTimeout(timeout) })
+    void api.status(controller.signal).then(next => { if (active) { setStatus(next); setError('') } }).catch(cause => { if (active) setError(errorMessage(cause)) }).finally(() => { if (active) setLoading(false); window.clearTimeout(timeout) })
     return () => { active = false; controller.abort(); window.clearTimeout(timeout) }
   }, [revision])
   useEffect(() => {
@@ -172,14 +186,15 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
   }
   const reset = () => {
     if (lock.current) return
-    setStep(null); setManifest(null); setRepositories(null); setQuery(''); setRepository(null); setImageRepository(''); setPlan(null); setPrUrl(''); setConnectionId(''); setError('')
+    hydratedTailnetRepository.current = null
+    setStep(null); setManifest(null); setRepositories(null); setQuery(''); setRepository(null); setImageRepository(''); setPlan(null); setPrUrl(''); setConnectionId(''); setError(''); setGuidance(null); setTailnet({ clientId: '', audience: '', tags: '' })
   }
-  const changeStep = (next: number) => { if (!lock.current) { setStep(next); setError(''); setManifest(null); setPrUrl(''); if (next < 2) setPlan(null) } }
+  const changeStep = (next: number) => { if (!lock.current) { setStep(next); setError(''); setManifest(null); setPrUrl(''); if (next < 3) setPlan(null) } }
   const refreshStatus = () => { if (!lock.current) { setError(''); setLoading(true); setRevision(value => value + 1) } }
   const checkGitHubPermissions = () => void perform(async () => {
     if (!status) return
     await checkGitHubPermissionsAndRefresh(api, status, setStatus, () => {
-      setRepositories(null); setQuery(''); setRepository(null); setImageRepository(''); setPlan(null); setPrUrl('')
+      setRepositories(null); setQuery(''); setRepository(null); setImageRepository(''); setPlan(null); setPrUrl(''); setGuidance(null)
     })
   })
   const loadRepositories = async () => {
@@ -187,21 +202,28 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
     const result = await api.repositories()
     setRepositories(result.repositories)
     // Discovery can change installation IDs or remove access. Never retain a stale approval.
-    setRepository(null); setImageRepository(''); setPlan(null)
+    setRepository(null); setImageRepository(''); setPlan(null); setGuidance(null); setTailnet({ clientId: '', audience: '', tags: '' })
   }
-  const selectRepository = (next: Repository) => { setRepository(next); setImageRepository(`ghcr.io/${next.fullName.toLowerCase()}`); setPlan(null); setError('') }
+  const selectRepository = (next: Repository) => { hydratedTailnetRepository.current = null; setRepository(next); setImageRepository(`ghcr.io/${next.fullName.toLowerCase()}`); setPlan(null); setGuidance(null); setTailnet({ clientId: '', audience: '', tags: '' }); setError('') }
   const startGitHub = () => void perform(async () => {
     const result = await api.startGitHub(registrationOwner === 'organization' ? organization : undefined)
     if (!githubManifestAction(result.action) || !result.manifest) throw new Error('The server returned an invalid GitHub consent destination. No handoff was made.')
     setManifest(result)
   })
-  const saveTailnet = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    void perform(async () => { const next = await api.saveTailnet(tailnet); setStatus(await api.status()); setTailnet(next.tailnet); setPlan(null) })
+  const loadGuidance = async () => {
+    if (!repository) return
+    setGuidance(null)
+    const next = await api.tailnetGuidance(repository)
+    setGuidance(next)
+    // Identity refresh and Back/forward must not discard this repository's draft.
+    // Selecting a different repository uses a different object and hydrates anew.
+    if (hydratedTailnetRepository.current !== repository) {
+      setTailnet(next.tailnet); hydratedTailnetRepository.current = repository
+    }
   }
   const saveConnection = (connection: Connection) => {
     setStatus(current => current ? { ...current, connections: [...current.connections.filter(saved => saved.id !== connection.id), connection] } : current)
-    setConnectionId(connection.id); setStep(3)
+    setConnectionId(connection.id); setStep(4)
   }
   const testPush = (id: string) => void perform(async () => {
     const result = await api.test(id); saveConnection(result.connection); setStatus(await api.status())
@@ -219,14 +241,15 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
   })
   const advance = () => void perform(async () => {
     if (step === 0) { if (!readyForPublisherRepositories(status)) return; await loadRepositories(); setStep(1) }
-    if (step === 1 && repository && !imageRepositoryProblem(imageRepository)) { const next = await api.plan(repository, imageRepository); setPlan(next); setStep(2) }
-    if (step === 2 && prUrl && repository) {
+    if (step === 1 && repository && !imageRepositoryProblem(imageRepository)) { setStep(2); await loadGuidance() }
+    if (step === 2 && repository && guidance?.subject) { setStatus(await api.saveTailnet({ ...tailnet, repository })); setPlan(null); const next = await api.plan(repository, imageRepository); setPlan(next); setStep(3) }
+    if (step === 3 && prUrl && repository) {
       const next = await api.plan(repository, imageRepository); setPlan(next); setPrUrl('')
-    } else if (step === 2 && canOpenWorkflowPlan(plan, repository, imageRepository) && repository && plan?.workflow) {
+    } else if (step === 3 && canOpenWorkflowPlan(plan, repository, imageRepository) && repository && plan?.workflow) {
       const result = await api.workflow(repository, imageRepository, plan.workflow.fingerprint)
       setPrUrl(result.prUrl || 'unverified')
       if (!githubPullRequestUrl(result.prUrl, repository)) throw new Error('The server returned an untrusted setup PR link. No external link was opened. Review again before retrying.')
-    } else if (step === 2 && canApplyPlan(plan, repository, imageRepository) && repository && plan) {
+    } else if (step === 3 && canApplyPlan(plan, repository, imageRepository) && repository && plan) {
       const result = await applyAndRefresh(api, plan, next => {
         setStatus(next)
         const saved = next.connections.find(item => item.repository.id === repository.id && item.repository.installationId === repository.installationId && item.imageRepository === imageRepository && item.state !== 'disconnected')
@@ -235,13 +258,13 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
       saveConnection(result.connection)
     }
   })
-  const registered = !!(status?.tailnet.clientId && status.tailnet.audience && status.tailnet.tags)
+
   const available = status?.available === true
   const readyForRepositories = readyForPublisherRepositories(status)
   const visible = repositories?.filter(item => item.fullName.toLowerCase().includes(query.toLowerCase())) ?? []
   const selectedConnection = status?.connections.find(item => item.id === connectionId)
   const workflowNeeded = canOpenWorkflowPlan(plan, repository, imageRepository)
-  const canAdvance = step === 0 ? readyForRepositories : step === 1 ? !!repository && !imageRepositoryProblem(imageRepository) : step === 2 ? !!prUrl || workflowNeeded || canApplyPlan(plan, repository, imageRepository) : false
+  const canAdvance = step === 0 ? readyForRepositories : step === 1 ? !!repository && !imageRepositoryProblem(imageRepository) : step === 2 ? !!guidance?.subject && [tailnet.clientId, tailnet.audience, tailnet.tags].every(value => !!value && !/\s/.test(value)) : step === 3 ? !!prUrl || workflowNeeded || canApplyPlan(plan, repository, imageRepository) : false
 
   return <><a className="skip-link" href="#publishers-content">Skip to publishers</a><header className="app-header publisher-header"><a className="brand" href="#monitor" onClick={event => { event.preventDefault(); if (!busy) onBack() }}>services</a><div className="auth-nav"><AppNavigation active="publishers" onMonitor={onBack} onAccounts={onAccounts} disabled={busy} /><span className="auth-username">{user.username}</span><button className="button secondary" onClick={onLogout} disabled={busy}>Sign out</button></div></header>
     <main className="workspace publishers-workspace" id="publishers-content"><section className="page-heading"><div><p className="eyebrow">INTEGRATIONS / GITHUB ACTIONS</p><h1>{step === null ? 'Image publishers' : 'Connect an image publisher'}</h1><p className="publisher-muted">Receive image updates directly from your publishing workflows.</p></div><button className="button secondary" disabled={busy || loading} onClick={refreshStatus}>Refresh</button></section>
@@ -252,21 +275,20 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
         {step === null && <GitHubPermissionNotice github={status.github} busy={busy} onFinish={() => changeStep(0)} />}
         {step === null ? <><section className="publisher-panel"><div className="publisher-panel-head"><h2>Connected publishers</h2><span className="publisher-badge">{status.connections.length ? `${status.connections.length} configured` : 'No repositories connected'}</span></div><div className="publisher-intro"><div><p className="eyebrow">GITHUB → YOUR HOME SERVER</p><h2>Connect a repository.<br />Let the next publish announce itself.</h2><p>Services configures the existing publishing integration and verifies that GitHub Actions can reach this server. You approve the access and the exact configuration.</p><button className="button primary" disabled={busy || !available} onClick={() => changeStep(0)}>Connect GitHub repository →</button><div className="publisher-route"><span>GitHub Actions</span>→<span>Private Tailscale route</span>→<span>Services</span></div></div><aside className="publisher-summary"><h3>What this setup does</h3><ul><li>Creates a repository-scoped publisher key and transfers it directly to an Actions secret.</li><li>Reviews existing supported hooks or proposes a safe workflow diff in a setup PR when supported.</li><li>Tests real push connectivity without publishing an image.</li></ul><p>Publication notifications only.<br />Container updates still need your confirmation.</p></aside></div></section><div className="publisher-connections">{status.connections.map(connection => <PublisherConnection key={connection.id} connection={connection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} />)}</div></>
           : <section className="publisher-panel publisher-wizard" aria-label="Publisher setup"><ol className="publisher-steps">{steps.map((name, index) => <li key={name} className={index === step ? 'active' : index < step ? 'done' : ''} aria-current={index === step ? 'step' : undefined}><span>{index < step ? '✓' : index + 1}</span>{name}</li>)}<li className="publisher-aside">GitHub Actions pushes metadata to Services over your private Tailscale connection.<br /><br />No automatic container updates.</li></ol><div className="publisher-wizard-content"><fieldset className="publisher-controls" disabled={busy || !available} aria-label="Publisher setup controls"><div className="publisher-step-content">
-            {step === 0 && <><h2>Authorize your connections</h2><p>These connections can be reused when you add another publisher.</p><div className="publisher-auth-row"><div><h3>GitHub App</h3><p>{status.github.connected ? status.github.name || 'Services GitHub App is connected.' : 'GitHub displays its own external consent screen. Review permissions and approve only the repositories you choose.'}</p></div>{status.github.connected ? <span className="publisher-badge good">Connected</span> : <span className="publisher-badge">Not connected</span>}</div>
+            {step === 0 && <><h2>Connect your GitHub App</h2><p>The GitHub App can be reused for repositories you explicitly authorize. Tailscale trust is configured separately after selecting a repository.</p><div className="publisher-auth-row"><div><h3>GitHub App</h3><p>{status.github.connected ? status.github.name || 'Services GitHub App is connected.' : 'GitHub displays its own external consent screen. Review permissions and approve only the repositories you choose.'}</p></div>{status.github.connected ? <span className="publisher-badge good">Connected</span> : <span className="publisher-badge">Not connected</span>}</div>
               {!status.github.connected && <GitHubRegistration owner={registrationOwner} organization={organization} onOwner={next => { setRegistrationOwner(next); setManifest(null); setError('') }} onOrganization={next => { setOrganization(next); setManifest(null); setError('') }} onSubmit={event => { event.preventDefault(); startGitHub() }} />}
               {manifest && <section className="publisher-info"><h3>Continue on GitHub</h3><p>You will leave Services to create and approve the GitHub App. GitHub returns you to Publishers. You can then install the app on selected repositories.</p><details><summary>Review nonsecret GitHub App manifest</summary><pre>{manifest.manifest}</pre></details><GitHubManifestForm manifest={manifest} lockRef={lock} /><button className="button secondary" onClick={() => setManifest(null)}>Cancel GitHub handoff</button></section>}
               <GitHubPermissions github={status.github} busy={busy} onCheck={checkGitHubPermissions} />
-              <div className="publisher-auth-row"><div><h3>Private delivery · Tailscale</h3><p>Register an existing federated CI identity once. Services does not automatically provision your tailnet and never requests an OAuth secret.</p></div><span className={`publisher-badge ${registered ? 'good' : ''}`}>{registered ? 'Registered' : 'Not registered'}</span></div>
-              <form className="publisher-tailnet" onSubmit={saveTailnet}><label>Federated client ID<input value={tailnet.clientId} onChange={event => setTailnet({ ...tailnet, clientId: event.target.value })} required autoComplete="off" /></label><label>Audience<input value={tailnet.audience} onChange={event => setTailnet({ ...tailnet, audience: event.target.value })} required autoComplete="off" /></label><label>Runner tags<input value={tailnet.tags} onChange={event => setTailnet({ ...tailnet, tags: event.target.value })} required placeholder="tag:services-publisher" autoComplete="off" /></label><button className="button secondary" type="submit">Register existing federation</button></form>
-              <div className="publisher-info">A tailnet administrator must configure federation trust for this repository/ref and allow the runner tags to reach this server over HTTPS. Registering these values does not grant network access.</div></>}
+              </>}
             {step === 1 && <><h2>Select a publishing repository</h2><p>Only repositories approved for the GitHub App appear here.</p><GitHubRepositoryAccess github={status.github} busy={busy} /><div className="publisher-repository-tools"><label>Find repository<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search repositories" /></label><button className="button secondary" onClick={() => void perform(loadRepositories)}>Refresh repositories</button></div>
               {repositories === null ? <p>No repositories loaded. Use Refresh repositories to retry.</p> : repositories.length === 0 ? <div className="publisher-info"><strong>No authorized repositories found</strong>Install the GitHub App on a repository, then refresh. GitHub installation discovery only runs when you ask for it.</div> : visible.length === 0 ? <p className="publisher-info">No matching repositories. Try another search.</p> : <div className="publisher-repository-list" role="radiogroup" aria-label="Publishing repository">{visible.map(item => <label className={`publisher-repository-choice ${item.id === repository?.id ? 'selected' : ''}`} key={`${item.installationId}:${item.id}`}><input type="radio" name="repository" value={item.id} checked={item.id === repository?.id && item.installationId === repository.installationId} onChange={() => selectRepository(item)} /><span><strong>{item.fullName}</strong><small>Default branch: {item.defaultBranch}</small></span></label>)}</div>}
               {repository && <><label className="publisher-image-field">Exact image repository<input value={imageRepository} onChange={event => { setImageRepository(event.target.value); setPlan(null); setError('') }} aria-describedby="publisher-image-help" aria-invalid={!!imageRepositoryProblem(imageRepository)} spellCheck={false} autoComplete="off" /></label><p id="publisher-image-help" className="publisher-muted">{imageRepositoryProblem(imageRepository) || 'Confirm the exact GHCR repository your workflow publishes. The suggested name is editable; it is not discovered from a publication.'}</p><dl className="publisher-facts"><div><dt>Repository</dt><dd>{repository.fullName}</dd></div><div><dt>Notification endpoint</dt><dd><code>{status.endpoint || 'Not configured'}</code></dd></div></dl><div className="publisher-info">This exact image repository becomes the publisher key’s allowlist. The key cannot read dashboard data or operate containers.</div></>}
             </>}
-            {step === 2 && plan && (prUrl ? <PublisherWorkflowPending plan={plan} prUrl={prUrl} /> : <PublisherReview plan={plan} />)}
-            {step === 2 && plan && plan.supported && !plan.workflow?.files.length && !canApplyPlan(plan, repository, imageRepository) && !plan.problems.length && <p className="notice danger" role="alert">The returned plan does not match this selection. Go Back and request a new review.</p>}
-            {step === 3 && (selectedConnection ? <PublisherConnection connection={selectedConnection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} /> : <p className="publisher-info">This connection was not present in the server’s latest response. Refresh to check its saved state.</p>)}
-          </div></fieldset><PublisherFooter step={step} busy={busy} available={available} canAdvance={!!canAdvance} workflowNeeded={workflowNeeded} pendingWorkflow={!!prUrl} onBack={() => step === 0 || step === 3 ? reset() : changeStep(step - 1)} onAdvance={advance} onCancel={reset} /></div></section>}
+            {step === 2 && repository && <PublisherTailscale repository={repository} guidance={guidance} tailnet={tailnet} endpoint={status.endpoint} busy={busy} onChange={next => { setTailnet(next); setPlan(null) }} onReload={() => void perform(loadGuidance)} />}
+            {step === 3 && plan && (prUrl ? <PublisherWorkflowPending plan={plan} prUrl={prUrl} /> : <PublisherReview plan={plan} />)}
+            {step === 3 && plan && plan.supported && !plan.workflow?.files.length && !canApplyPlan(plan, repository, imageRepository) && !plan.problems.length && <p className="notice danger" role="alert">The returned plan does not match this selection. Go Back and request a new review.</p>}
+            {step === 4 && (selectedConnection ? <PublisherConnection connection={selectedConnection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} /> : <p className="publisher-info">This connection was not present in the server’s latest response. Refresh to check its saved state.</p>)}
+          </div></fieldset><PublisherFooter step={step} busy={busy} available={available} canAdvance={!!canAdvance} workflowNeeded={workflowNeeded} pendingWorkflow={!!prUrl} onBack={() => step === 0 || step === 4 ? reset() : changeStep(step - 1)} onAdvance={advance} onCancel={reset} /></div></section>}
         <p className="publisher-explain">Push delivery · no GitHub publication polling. Existing federation is registered, not automatically provisioned. Image installation always requires confirmation.</p></>}
     </main>{confirmation && <PublisherConfirmation connection={confirmation.connection} action={confirmation.action} busy={busy} error={error} onCancel={() => { if (!lock.current) { setConfirmation(null); setError('') } }} onConfirm={confirmManagement} />}</>
 }

@@ -10,6 +10,45 @@ const api = await server.ssrLoadModule('/src/publisherApi.ts').catch(() => ({}))
 const ui = await server.ssrLoadModule('/src/Publishers.tsx').catch(() => ({}))
 const repository = { id: 14, fullName: 'Acme/Website', defaultBranch: 'main', installationId: 8 }
 
+test('Tailscale setup explains a repository-specific trust with exact fetched subject and safe links', () => {
+  assert.equal(typeof ui.PublisherTailscale, 'function')
+  const guidance = { issuer: 'https://token.actions.githubusercontent.com', subject: 'repo:Acme@42/Website@14:ref:refs/heads/main', tailnet: { clientId: '', audience: '', tags: '' } }
+  const props = { repository, guidance, tailnet: { clientId: 'finance-client', audience: 'api.tailscale.com/finance-client', tags: 'tag:services-publisher' }, endpoint: 'https://services.test/api/images/published', busy: false, onChange() {}, onReload() {} }
+  const html = renderToStaticMarkup(createElement(ui.PublisherTailscale, props))
+  for (const text of ['Acme/Website', guidance.issuer, guidance.subject, 'Auth Keys', 'Write', 'tag:services-publisher', 'HTTPS', 'Client ID', 'Audience', '403', 'not verified', 'another repository']) assert.ok(html.includes(text), text)
+  assert.match(html, /href="https:\/\/login.tailscale.com\/admin\/settings\/trust-credentials"/)
+  assert.match(html, /href="https:\/\/tailscale.com\/docs\/features\/workload-identity-federation"/)
+  assert.doesNotMatch(html, /OAuth secret|Register existing federation/)
+  const unavailable = renderToStaticMarkup(createElement(ui.PublisherTailscale, { ...props, guidance: { ...guidance, subject: '', subjectError: 'Custom claims require manual review' } }))
+  assert.match(unavailable, /Custom claims require manual review/)
+  assert.doesNotMatch(unavailable, /repo:Acme\/Website:ref/)
+})
+
+test('Tailscale requests bind identity discovery and credential saving to the exact selected repository', async () => {
+  const calls = []
+  const saved = { issuer: 'https://token.actions.githubusercontent.com', subject: 'repo:Acme@42/Website@14:ref:refs/heads/main', tailnet: { clientId: 'selected-client', audience: 'selected-audience', tags: 'tag:selected' } }
+  const client = api.createPublisherApi(async (url, options) => { calls.push({ url, ...options }); return Response.json(saved) })
+  assert.deepEqual(await client.tailnetGuidance(repository), saved)
+  assert.deepEqual(await client.saveTailnet({ repository, ...saved.tailnet }), saved)
+  assert.deepEqual(calls.map(call => [call.url, call.method, JSON.parse(call.body)]), [
+    ['/api/publishers/tailnet/guidance', 'POST', { repository }],
+    ['/api/publishers/tailnet', 'PUT', { repository, ...saved.tailnet }],
+  ])
+  for (const call of calls) { assert.equal(call.credentials, 'same-origin'); assert.equal(call.cache, 'no-store'); assert.ok(call.signal instanceof AbortSignal) }
+})
+
+test('five-step wizard footer keeps GitHub, repository selection, and Tailscale save approvals separate', () => {
+  const props = { busy: false, available: true, canAdvance: true, workflowNeeded: false, pendingWorkflow: false, onBack() {}, onAdvance() {}, onCancel() {} }
+  for (const [step, label] of [[0, 'Select repository'], [1, 'Set up Tailscale'], [2, 'Save &amp; review']]) {
+    const html = renderToStaticMarkup(createElement(ui.PublisherFooter, { ...props, step }))
+    assert.ok(html.includes(label), label)
+    assert.doesNotMatch(html, /Apply &amp; test push|Open setup PR/)
+  }
+  const verify = renderToStaticMarkup(createElement(ui.PublisherFooter, { ...props, step: 4 }))
+  assert.match(verify, /Back to publishers/)
+  assert.doesNotMatch(verify, /class="button primary"/)
+})
+
 test('repository access guidance explains installation and safely links the registered app', async () => {
   assert.equal(typeof ui.GitHubRepositoryAccess, 'function')
   const github = { connected: true, permissionsChecked: true, variablesWrite: true, installUrl: 'https://github.com/apps/services/installations/new' }
@@ -20,7 +59,7 @@ test('repository access guidance explains installation and safely links the regi
   assert.match(html, /target="_blank" rel="noreferrer"/)
   for (const change of [{ installUrl: undefined }, { installUrl: 'https://evil.test/apps/services/installations/new' }]) {
     assert.doesNotMatch(render(change), /href=/)
-    assert.match(render(change), /Back.*Connections.*Install on selected repositories/)
+    assert.match(render(change), /Back.*GitHub App.*Install on selected repositories/)
   }
   assert.doesNotMatch(render({}, true), /href=/)
   assert.doesNotMatch(render({ variablesWrite: false }), /href=/)
@@ -72,7 +111,7 @@ test('explicit GitHub permission check posts empty authenticated JSON and return
   }
 })
 
-test('repository readiness fails closed until an exact saved GitHub grant and federation are ready', () => {
+test('repository discovery requires GitHub approval but not a Tailscale credential before selection', () => {
   assert.equal(typeof api.githubVariablesReady, 'function')
   assert.equal(typeof api.readyForPublisherRepositories, 'function')
   const github = { connected: true, permissionsChecked: true, variablesWrite: true }
@@ -84,7 +123,8 @@ test('repository readiness fails closed until an exact saved GitHub grant and fe
   }
   assert.equal(api.readyForPublisherRepositories(null), false)
   assert.equal(api.readyForPublisherRepositories({ ...saved, available: false }), false)
-  for (const field of ['clientId', 'audience', 'tags']) assert.equal(api.readyForPublisherRepositories({ ...saved, tailnet: { ...saved.tailnet, [field]: '' } }), false)
+  for (const field of ['clientId', 'audience', 'tags']) assert.equal(api.readyForPublisherRepositories({ ...saved, tailnet: { ...saved.tailnet, [field]: '' } }), true)
+  assert.equal(api.readyForPublisherRepositories({ ...saved, tailnet: undefined }), true)
 })
 
 test('GitHub App permissions settings links accept only exact personal or organization destinations', () => {
@@ -503,7 +543,7 @@ test('workflow diff and compact confirmation styling preserve the responsive war
 
 test('shared wizard footer keeps explicit PR, review-again and apply approvals distinct and gated', () => {
   const calls = []
-  const props = { step: 2, busy: false, available: true, canAdvance: true, workflowNeeded: false, pendingWorkflow: false, onBack: () => calls.push('back'), onAdvance: () => calls.push('advance'), onCancel: () => calls.push('cancel') }
+  const props = { step: 3, busy: false, available: true, canAdvance: true, workflowNeeded: false, pendingWorkflow: false, onBack: () => calls.push('back'), onAdvance: () => calls.push('advance'), onCancel: () => calls.push('cancel') }
   for (const [state, label] of [[{}, 'Apply &amp; test push'], [{ workflowNeeded: true }, 'Open setup PR'], [{ workflowNeeded: true, pendingWorkflow: true }, 'Review again']]) {
     const html = renderToStaticMarkup(createElement(ui.PublisherFooter, { ...props, ...state }))
     assert.match(html, /<footer class="publisher-footer">/)

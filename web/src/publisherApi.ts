@@ -1,6 +1,8 @@
 import { AuthError, sessionExpiredEvent, sessionFetch } from './authApi.ts'
 
 export type Repository = { id: number; fullName: string; defaultBranch: string; installationId: number }
+export type Tailnet = { clientId: string; audience: string; tags: string }
+export type TailnetGuidance = { issuer: string; subject: string; subjectError?: string; tailnet: Tailnet }
 export type Publication = { version?: string; digest: string; tags: string[]; commit: string; runUrl: string; publishedAt: string; receivedAt: string; result: string }
 export type Connection = {
   id: string; repository: Repository; imageRepository: string
@@ -12,7 +14,8 @@ export type Connection = {
 export type PublisherStatus = {
   available: boolean; reason?: string
   github: { connected: boolean; name?: string; installUrl?: string; permissionsChecked?: boolean; variablesWrite?: boolean; settingsUrl?: string }
-  tailnet: { clientId: string; audience: string; tags: string }
+  tailnet: Tailnet
+  tailnets?: Record<string, Tailnet>
   endpoint: string; connections: Connection[]
 }
 export type PublisherPlan = {
@@ -27,7 +30,7 @@ export function githubVariablesReady(github: PublisherStatus['github']) {
   return github.connected === true && github.permissionsChecked === true && github.variablesWrite === true
 }
 export function readyForPublisherRepositories(status: PublisherStatus | null) {
-  return !!(status?.available === true && githubVariablesReady(status.github) && status.tailnet.clientId && status.tailnet.audience && status.tailnet.tags)
+  return !!(status?.available === true && githubVariablesReady(status.github))
 }
 
 export function imageRepositoryProblem(value: string) {
@@ -120,7 +123,8 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
     status: (signal?: AbortSignal) => request<PublisherStatus>('', 'GET', undefined, signal),
     checkGitHubPermissions: () => request<PublisherStatus>('/github/permissions', 'POST', {}),
     startGitHub: (organization?: string) => request<GitHubStart>('/github/start', 'POST', organization === undefined ? {} : { organization }),
-    saveTailnet: (body: PublisherStatus['tailnet']) => request<PublisherStatus>('/tailnet', 'PUT', body),
+    saveTailnet: (body: Tailnet & { repository: Repository }) => request<PublisherStatus>('/tailnet', 'PUT', body),
+    tailnetGuidance: (repository: Repository) => request<TailnetGuidance>('/tailnet/guidance', 'POST', { repository }),
     repositories: () => request<{ repositories: Repository[] }>('/repositories'),
     plan: (repository: Repository, imageRepository: string) => request<PublisherPlan>('/plan', 'POST', { repository, imageRepository }),
     apply: (repository: Repository, imageRepository: string, approval?: string) => request<{ connection: Connection }>('', 'POST', { repository, imageRepository, ...(approval === undefined ? {} : { approval }) }),

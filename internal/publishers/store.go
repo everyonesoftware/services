@@ -83,6 +83,7 @@ type Pending struct {
 type Snapshot struct {
 	App         App
 	Tailnet     Tailnet
+	Tailnets    map[string]Tailnet
 	Connections []Connection
 	Pending     Pending
 }
