@@ -56,6 +56,15 @@ test('five-step wizard footer keeps GitHub, repository selection, and Tailscale 
   assert.doesNotMatch(verify, /class="button primary"/)
 })
 
+test('GitHub App permission setup leaves repository access instructions to the Repository step', () => {
+  const github = { connected: true, permissionsChecked: true, variablesWrite: true, installUrl: 'https://github.com/apps/services/installations/new' }
+  const html = renderToStaticMarkup(createElement(ui.GitHubPermissions, { github, busy: false, onCheck() {} }))
+  assert.match(html, /Variables write permission verified/)
+  assert.match(html, /Check GitHub permissions/)
+  assert.doesNotMatch(html, /Choose repository access on GitHub|Install on selected repositories|Refresh repositories/)
+  assert.doesNotMatch(html, /href="https:\/\/github.com\/apps\/services\/installations\/new"/)
+})
+
 test('repository access guidance explains installation and safely links the registered app', async () => {
   assert.equal(typeof ui.GitHubRepositoryAccess, 'function')
   const github = { connected: true, permissionsChecked: true, variablesWrite: true, installUrl: 'https://github.com/apps/services/installations/new' }
@@ -152,8 +161,8 @@ test('one-time GitHub Variables step distinguishes unchecked, missing and verifi
   assert.match(render({ permissionsChecked: true }), /not been checked/)
   const verified = render({ permissionsChecked: true, variablesWrite: true })
   assert.match(verified, /Variables write permission verified/)
-  assert.match(verified, /href="https:\/\/github.com\/apps\/services\/installations\/new"/)
-  assert.ok(verified.indexOf('One-time GitHub Variables') < verified.indexOf('Install on selected repositories'))
+  assert.doesNotMatch(verified, /href="[^"]*installations/)
+  assert.doesNotMatch(verified, /Install on selected repositories/)
   assert.match(verified, /installation.*fresh|fresh.*installation/)
   for (const settingsUrl of [undefined, 'https://evil.test/settings/apps/services/permissions', 'https://github.com/settings/apps/services/permissions?redirect=evil']) {
     const html = render({ settingsUrl })

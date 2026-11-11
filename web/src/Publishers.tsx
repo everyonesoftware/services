@@ -61,7 +61,7 @@ export function GitHubPermissions({ github, busy, onCheck }: { github: Publisher
   if (!github.connected) return null
   const ready = githubVariablesReady(github)
   const checked = github.permissionsChecked === true && typeof github.variablesWrite === 'boolean'
-  return <><section className={`publisher-info ${ready ? '' : 'publisher-warning'}`} aria-label="GitHub Variables permission"><h3>One-time GitHub Variables permission</h3>
+  return <section className={`publisher-info ${ready ? '' : 'publisher-warning'}`} aria-label="GitHub Variables permission"><h3>One-time GitHub Variables permission</h3>
     <p>GitHub cannot request Variables permission during manifest registration. Finish this one-time approval manually; Services still configures repositories automatically after your review.</p>
     <p>GitHub App settings → Permissions &amp; events → Repository permissions → Variables → Read and write → Save.</p>
     {github.settingsUrl && githubPermissionsUrl(github.settingsUrl) ? !busy && <a className="button secondary" href={github.settingsUrl} target="_blank" rel="noreferrer">Open GitHub App permission settings ↗</a> : <p>Check permissions to load settings link.</p>}
@@ -69,7 +69,7 @@ export function GitHubPermissions({ github, busy, onCheck }: { github: Publisher
     <p role="status"><strong>{ready ? 'Variables write permission verified' : checked ? 'Variables write permission is missing' : 'Variables permission has not been checked'}</strong></p>
     <button className="button secondary" type="button" disabled={busy} onClick={onCheck}>Check GitHub permissions</button>
     <p className="publisher-muted">Permission checks run on demand, without GitHub polling. Before review and apply, the server makes a fresh check with the actual installation-scoped token.</p>
-  </section>{ready && <div className="publisher-info"><strong>Choose repository access on GitHub</strong><p>Install the app on the repositories you want to connect. After approving installation, return here and select a repository. Use Refresh repositories to discover newly granted access.</p>{github.installUrl && githubInstallUrl(github.installUrl) ? !busy && <a className="button secondary" href={github.installUrl} target="_blank" rel="noreferrer">Install on selected repositories ↗</a> : <p>Installation link unavailable. Refresh this page or check the GitHub App configuration.</p>}</div>}</>
+  </section>
 }
 
 type RegistrationProps = { owner: 'personal' | 'organization'; organization: string; onOwner: (owner: 'personal' | 'organization') => void; onOrganization: (value: string) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }
