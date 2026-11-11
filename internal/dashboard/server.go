@@ -151,6 +151,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
+	// Revalidate install resources and HTML without changing API or asset caching.
+	switch r.URL.Path {
+	case "/", "/index.html", "/sw.js", "/manifest.webmanifest", "/offline.html":
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	var ok bool
 	r, ok = s.authorize(w, r)
 	if !ok {

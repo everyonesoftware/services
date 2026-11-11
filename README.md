@@ -278,6 +278,14 @@ docker compose up --build -d
 
 Open `http://localhost:8080`. The supplied Compose file targets Docker Desktop on Windows with application projects under `E:/Containers`.
 
+### Install as an app
+
+Services includes a web app manifest, standalone launch mode, desktop/Android icons, a maskable icon, and an Apple touch icon. After deploying the new build, open Services over **HTTPS** (for example through your existing Tailscale HTTPS origin), then use your browser's **Install app** action. On iPhone/iPad, use Safari's **Share → Add to Home Screen**. Local development on `localhost` or `127.0.0.1` is also supported; plain HTTP on a remote LAN IP is not a secure context for the service worker.
+
+The production service worker stores **only a public offline screen**. It does not cache the dashboard, account/session responses, service status, uploaded icons, or API requests. When a navigation cannot reach the server after an initial online visit, Services shows a disconnected screen with **Try again** instead of presenting old status as current. Management actions are never queued for offline replay. Existing server-owned operations are unaffected by closing or disconnecting the app.
+
+Updates do not force-reload an open session. The worker checks bypass HTTP caches, and a new worker waits for existing controlled windows to close before taking over. Development (`npm run dev`) does not register a worker; test offline behavior against a production build on a separate origin/port from development.
+
 Configure these environment variables (for example in a local `.env` file):
 
 | Variable | Purpose |
@@ -325,6 +333,8 @@ go build ./cmd/services
 Notification tests use local HTTP/registry fixtures and temporary SQLite databases, not a live GHCR publish or an application update. The workflow uses GitHub's documented `concurrency.queue: max`; actionlint 1.7.12 does not yet recognize that property. If using that linter version, suppress only its specific `unexpected key "queue" for "concurrency" section` diagnostic, not other syntax or expression checks.
 
 The Go server serves `web/dist`. Run `go run ./cmd/services` after building the frontend. Native Windows development can exercise API and UI behavior, but the production Docker connector uses a Unix socket inside the Linux container.
+
+The PWA unit tests run with `npm test`; `npm run build` generates `web/dist/sw.js` from the public offline page. To exercise the actual production artifact in a browser, run `node tests/pwa.browser.mjs` from `web` after building, with Playwright available. `PLAYWRIGHT_MODULE` can point to an external Playwright module URL, `PLAYWRIGHT_CHANNEL=msedge` can select installed Edge instead of Playwright's Chromium, and `PWA_SCREENSHOT_DIR` optionally retains desktop/390px screenshots. This uses isolated browser profiles and a signed-out API fixture, not your live Docker host, and checks manifest/installability, worker activation, offline navigation, uncached API failures, and reconnect/retry.
 
 Tests use local Docker/registry HTTP fixtures and fake Compose runners; they do not update your real applications. Storage tests reopen real temporary databases. Worker and recovery tests must cover duplicate submission, dashboard restart, missing/stopped workers, and uncertain results as well as normal completion. Mount tests cover both named volumes and exact daemon-reported host paths, read-only/unsupported/ambiguous storage rejection, and bind-capability checks before self-update. Real socket permissions, named-volume or host-folder ownership, cross-process SQLite locking, mounted project paths, registry credentials/availability, and actual Compose recreation must also be verified on the target host.
 
