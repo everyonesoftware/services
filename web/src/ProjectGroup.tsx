@@ -8,7 +8,7 @@ import type { IconEditorTarget } from './ServiceIcon.tsx'
 
 type IconEditingProps = { icons?: Icon[]; iconsAvailable?: boolean; onEditIcon?: (target: IconEditorTarget) => void }
 
-const labels: Record<string, string> = { healthy: 'Healthy', completed: 'Completed', 'running-unverified': 'No health check', 'restart-loop': 'Restart loop', 'oom-killed': 'Out of memory', missing: 'Missing', unhealthy: 'Unhealthy', starting: 'Starting', restarting: 'Restarting', stopped: 'Stopped', exited: 'Exited', running: 'Running' }
+const labels: Record<string, string> = { queued: 'Queued', updating: 'Updating', healthy: 'Healthy', completed: 'Completed', 'running-unverified': 'No health check', 'restart-loop': 'Restart loop', 'oom-killed': 'Out of memory', missing: 'Missing', unhealthy: 'Unhealthy', starting: 'Starting', restarting: 'Restarting', stopped: 'Stopped', exited: 'Exited', running: 'Running' }
 export function StatusBadge({ status }: { status: string }) {
   const tone = statusSeverity(status) === 0 ? 'good' : statusSeverity(status) < 3 ? 'caution' : 'bad'
   return <span className={`status-badge ${tone}`}><i />{labels[status] || status}</span>

@@ -5,6 +5,29 @@ import * as monitor from './monitor.ts'
 const container = (changes = {}) => ({ id: 'a', name: 'web-1', project: 'site', service: 'web', image: 'nginx:stable', state: 'running', health: 'healthy', monitorStatus: 'healthy', ...changes })
 const project = (name, containers, status = 'healthy') => ({ name, containers, status })
 
+test('queued and running updates move only their project from Updates to Needs attention until finished', () => {
+  assert.equal(typeof monitor.projectsWithOperations, 'function')
+  const site = project('site', [container({ updateAvailable: true })])
+  const other = project('other', [container({ updateAvailable: true })])
+  for (const state of ['queued', 'running']) {
+    const projects = monitor.projectsWithOperations([site, other], [{ id: 'active', project: 'site', state }])
+    assert.deepEqual(monitor.selectProjects(projects, '', 'updates').map(p => p.name), ['other'])
+    assert.deepEqual(monitor.selectProjects(projects, '', 'attention').map(p => p.name), ['site'])
+    assert.equal(monitor.projectHealthStatus(projects[0]), state === 'queued' ? 'queued' : 'updating')
+    assert.deepEqual(monitor.availableServices(projects[0]), [])
+    assert.equal(monitor.canUpdateProject(projects[0]), false)
+    assert.equal(monitor.availableServices(projects[1]).length, 1)
+  }
+  for (const state of ['complete', 'error']) {
+    const projects = monitor.projectsWithOperations([site], [{ id: 'done', project: 'site', state }])
+    assert.deepEqual(monitor.selectProjects(projects, '', 'updates'), [site])
+    assert.equal(monitor.canUpdateProject(projects[0]), true)
+  }
+  assert.equal(site.updateState, undefined, 'do not mutate the API snapshot')
+  const refreshed = project('site', [container()])
+  assert.deepEqual(monitor.selectProjects(monitor.projectsWithOperations([refreshed], []), '', 'updates'), [])
+})
+
 test('search covers service, image, name and reasons; filters preserve problem-first ordering without mutating input', () => {
   assert.equal(typeof monitor.selectProjects, 'function')
   const healthy = project('alpha', [container()])

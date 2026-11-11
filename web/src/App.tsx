@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { checkForUpdates } from './api.ts'
-import { availableServices, connectionState, needsAttention, recentEvents, selectProjects } from './monitor.ts'
+import { availableServices, connectionState, needsAttention, projectsWithOperations, recentEvents, selectProjects } from './monitor.ts'
 import type { Filter, IconList, Monitor, Operation, Project } from './types.ts'
 import { IconDialog } from './IconDialog.tsx'
 import type { IconEditorTarget } from './ServiceIcon.tsx'
@@ -14,7 +14,7 @@ export { ProjectGroup, UpdateDialog, DockerActivity }
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed'
 const timeLabel = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Not yet checked'
 
-function usePolling<T>(url: string, interval: number, paused = false) {
+function usePolling<T>(url: string, interval: number, paused = false, onReceived?: (next: T) => void) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -35,7 +35,7 @@ function usePolling<T>(url: string, interval: number, paused = false) {
         const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
         if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
         const next = await response.json() as T
-        if (active) { setData(next); setError('') }
+        if (active) { setData(next); setError(''); onReceived?.(next) }
       } catch (cause) {
         if (active) setError(cause instanceof DOMException && cause.name === 'AbortError' ? 'Request timed out' : errorMessage(cause))
       } finally {
@@ -47,7 +47,7 @@ function usePolling<T>(url: string, interval: number, paused = false) {
     void poll()
     const timer = window.setInterval(poll, interval)
     return () => { active = false; window.clearInterval(timer); controller?.abort() }
-  }, [url, interval, revision, paused])
+  }, [url, interval, revision, paused, onReceived])
   return { data, error, loading, refresh, replace }
 }
 
@@ -59,8 +59,13 @@ export default function App({ user, onAccounts, onPublishers, onLogout }: AppPro
   const iconsAvailable = iconsRequest.data?.available === true && !iconsRequest.error
   const projectsRequest = usePolling<{ projects: Project[] }>('/api/projects', 30_000)
   const monitorRequest = usePolling<Monitor>('/api/monitor', 15_000)
-  const operationsRequest = usePolling<{ operations: Operation[] }>('/api/operations', 2_000)
-  const operations = operationsRequest.data?.operations ?? []
+  const [acceptedOperations, setAcceptedOperations] = useState<Operation[]>([])
+  const receivedOperations = useCallback((next: { operations: Operation[] }) => {
+    setAcceptedOperations(current => current.filter(accepted => !next.operations.some(operation => operation.id === accepted.id)))
+  }, [])
+  const operationsRequest = usePolling<{ operations: Operation[] }>('/api/operations', 2_000, false, receivedOperations)
+  const polledOperations = operationsRequest.data?.operations
+  const operations = [...(polledOperations ?? []), ...acceptedOperations.filter(accepted => !polledOperations?.some(operation => operation.id === accepted.id))]
   const engineBusy = operations.some(operation => operation.state === 'running' || operation.state === 'queued')
   const finishedOperations = operations.filter(operation => operation.state === 'complete' || operation.state === 'error').map(operation => operation.id).join(',')
   const refreshProjects = projectsRequest.refresh
@@ -73,7 +78,7 @@ export default function App({ user, onAccounts, onPublishers, onLogout }: AppPro
   const [updateTarget, setUpdateTarget] = useState<Project | null>(null)
   const checkLock = useRef(false)
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
-  const projects = projectsRequest.data?.projects ?? []
+  const projects = projectsWithOperations(projectsRequest.data?.projects ?? [], operations)
   const monitor = monitorRequest.data
   const error = monitorRequest.error || projectsRequest.error
   const connection = connectionState(monitor, error, now)
@@ -113,6 +118,6 @@ export default function App({ user, onAccounts, onPublishers, onLogout }: AppPro
       <details className="activity"><summary className="activity-summary">Recent activity <span className="count">{events.length}</span></summary>{events.length === 0 ? <div className="activity-empty">{monitorRequest.loading ? 'Waiting for monitor events…' : monitorRequest.error ? 'Activity unavailable until monitoring reconnects.' : 'No events yet.'}</div> : <ol className="event-list">{recentEvents(events).map(event => <li key={event.id}><span className={`event-dot ${event.kind}`} /><div><p><strong>{event.project || event.name || 'Engine'}</strong><span className="event-kind">{event.kind.replaceAll('_', ' ')}</span></p><p className="event-message">{event.message}</p>{event.name && event.project && <span className="event-name">{event.name}</span>}</div><time title={event.time}>{timeLabel(event.time)}</time></li>)}</ol>}</details>
     </main>
     {iconTarget && <IconDialog target={iconTarget} available={iconsAvailable} onClose={() => setIconTarget(null)} onSaved={(next, reset) => { iconsRequest.replace(next); setNotice({ text: reset ? 'Default icon restored.' : 'Icon saved locally.', error: false }) }} />}
-    {updateTarget && <UpdateDialog key={updateTarget.name} project={updateTarget} onClose={() => setUpdateTarget(null)} onUpdated={refresh} engineBusy={engineBusy} />}
+    {updateTarget && <UpdateDialog key={updateTarget.name} project={updateTarget} onClose={() => setUpdateTarget(null)} onUpdated={operation => { if (operation) setAcceptedOperations(current => [...current.filter(item => item.id !== operation.id), operation]); refresh() }} engineBusy={engineBusy} />}
   </>
 }
