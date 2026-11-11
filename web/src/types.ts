@@ -37,7 +37,7 @@ export type Container = {
   updateCheckedAt?: string
   updatePublication?: ImagePublication
 }
-export type Project = { name: string; status: string; updateAvailable?: boolean; updateState?: 'queued' | 'running'; containers: Container[] }
+export type Project = { name: string; status: string; updateAvailable?: boolean; updateState?: 'queued' | 'running' | 'refreshing'; containers: Container[] }
 export type Incident = { id: string; project: string; service: string; name: string; status: string; reason: string; since: string; snoozedUntil?: string }
 export type ResolutionAction = 'forget' | 'replace' | 'snooze'
 export type ResolutionDecision = { incidentId: string; since: string; action: ResolutionAction; replacementId?: string; snoozeSeconds?: 900 | 3600 | 86400; snoozedUntil?: string }

@@ -9,7 +9,7 @@ import type { IconEditorTarget } from './ServiceIcon.tsx'
 type IconEditingProps = { icons?: Icon[]; iconsAvailable?: boolean; onEditIcon?: (target: IconEditorTarget) => void }
 type ResolutionProps = { onResolve?: (container: Container, trigger: HTMLElement) => void; resolveDisabled?: boolean }
 
-const labels: Record<string, string> = { queued: 'Queued', updating: 'Updating', healthy: 'Healthy', completed: 'Completed', 'running-unverified': 'No health check', 'restart-loop': 'Restart loop', 'oom-killed': 'Out of memory', missing: 'Missing', unhealthy: 'Unhealthy', starting: 'Starting', restarting: 'Restarting', stopped: 'Stopped', exited: 'Exited', running: 'Running' }
+const labels: Record<string, string> = { queued: 'Queued', updating: 'Updating', refreshing: 'Refreshing', healthy: 'Healthy', completed: 'Completed', 'running-unverified': 'No health check', 'restart-loop': 'Restart loop', 'oom-killed': 'Out of memory', missing: 'Missing', unhealthy: 'Unhealthy', starting: 'Starting', restarting: 'Restarting', stopped: 'Stopped', exited: 'Exited', running: 'Running' }
 export function StatusBadge({ status }: { status: string }) {
   const tone = statusSeverity(status) === 0 ? 'good' : statusSeverity(status) < 3 ? 'caution' : 'bad'
   return <span className={`status-badge ${tone}`}><i />{labels[status] || status}</span>
@@ -27,7 +27,7 @@ export function ProjectGroup({ project, onReview, actionsDisabled, icons = [], i
     <summary className="group-summary"><span className="disclosure" aria-hidden="true">›</span><span className="group-identity"><strong className="identity-name"><ServiceIcon icon={automatic} custom={current} project label={`Edit ${project.name} project icon`} onEdit={iconsAvailable && onEditIcon ? trigger => onEditIcon({ kind: 'project', key: project.name, automatic, current, trigger }) : undefined} /><span>{project.name}</span></strong><span>{services} {services === 1 ? 'service' : 'services'} <b>·</b> {project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span></span><span className="group-signals">{updates.length > 0 && <span className="update-label">{updates.length} {updates.length === 1 ? 'update' : 'updates'}</span>}<StatusBadge status={status} /></span></summary>
     <div className="group-body">
       {updates.length > 0 && <div className="group-update"><span>{eligible ? 'New images available.' : 'Updates require valid Compose configuration and service labels.'}</span><button type="button" className="button update-button" disabled={actionsDisabled || !eligible} onClick={() => onReview(project)}>Review {updates.length} {updates.length === 1 ? 'update' : 'updates'} <span aria-hidden="true">↗</span></button></div>}
-      {project.containers.map(container => <ContainerRow key={container.id} container={container} icons={icons} iconsAvailable={iconsAvailable} onEditIcon={onEditIcon} onResolve={onResolve} resolveDisabled={resolveDisabled ?? actionsDisabled} />)}
+      {project.containers.map(container => <ContainerRow key={container.id} container={project.updateState === 'refreshing' ? { ...container, updateAvailable: false, updatePublication: undefined, updateStatus: undefined, updateError: undefined, updateCheckedAt: undefined } : container} icons={icons} iconsAvailable={iconsAvailable} onEditIcon={onEditIcon} onResolve={onResolve} resolveDisabled={resolveDisabled ?? actionsDisabled} />)}
     </div>
   </details>
 }

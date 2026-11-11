@@ -1,9 +1,14 @@
 import type { Container, Filter, Monitor, Operation, Project } from './types.ts'
 
-export function projectsWithOperations(projects: Project[], operations: Operation[]): Project[] {
-  const active = new Map<string, 'queued' | 'running'>()
+export function projectsWithOperations(projects: Project[], operations: Operation[], refreshing = false): Project[] {
+  const active = new Map<string, 'queued' | 'running' | 'refreshing'>()
+  if (refreshing) {
+    for (const operation of operations) {
+      if (operation.state === 'complete' || operation.state === 'error') active.set(operation.project, 'refreshing')
+    }
+  }
   for (const operation of operations) {
-    if (operation.state === 'running' || (operation.state === 'queued' && !active.has(operation.project))) active.set(operation.project, operation.state)
+    if (operation.state === 'running' || (operation.state === 'queued' && active.get(operation.project) !== 'running')) active.set(operation.project, operation.state)
   }
   return projects.map(project => active.has(project.name) ? { ...project, updateState: active.get(project.name) } : project)
 }
@@ -75,12 +80,12 @@ export function isSnoozed(until?: string, now = Date.now()): boolean {
 export function statusSeverity(status: string): number {
   if (['healthy', 'completed'].includes(status)) return 0
   if (['running-unverified', 'running'].includes(status)) return 1
-  if (['starting', 'queued', 'updating'].includes(status)) return 2
+  if (['starting', 'queued', 'updating', 'refreshing'].includes(status)) return 2
   return 3
 }
 
 export function projectHealthStatus(project: Project): string {
-  if (project.updateState) return project.updateState === 'running' ? 'updating' : 'queued'
+  if (project.updateState) return project.updateState === 'running' ? 'updating' : project.updateState
   const statuses = project.containers.map(containerStatus).sort((a, b) => statusSeverity(b) - statusSeverity(a))
   const worst = statuses[0]
   if (worst && statusSeverity(worst) >= statusSeverity(project.status === 'running' ? 'healthy' : project.status)) return worst

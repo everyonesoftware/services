@@ -47,6 +47,8 @@ type originAuthority struct {
 }
 
 type Server struct {
+	inventoryMu                     sync.Mutex
+	inventoryCompletions            map[string]string
 	publishers                      *publisherIntegration
 	publisherConfigurationAttempted bool
 	authRequired                    bool
@@ -167,7 +169,7 @@ func (s *Server) checkUpdates(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Update checks are not configured", http.StatusServiceUnavailable)
 		return
 	}
-	containers, err := s.source.Containers()
+	containers, err := s.projectContainers(r.Context())
 	if err != nil {
 		http.Error(w, "Docker engine unavailable", http.StatusServiceUnavailable)
 		return
@@ -201,7 +203,7 @@ func (s *Server) monitorInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
-	containers, err := s.source.Containers()
+	containers, err := s.projectContainers(r.Context())
 	if err != nil {
 		http.Error(w, "Docker engine unavailable", http.StatusServiceUnavailable)
 		return

@@ -100,6 +100,14 @@ const publication = {
   publishedAt: '2026-11-09T12:34:56Z',
 }
 const publicationProject = (value) => ({ ...fixture, containers: [{ ...fixture.containers[0], updatePublication: value }] })
+
+test('refreshing project labels reconciliation and hides stale publication details and actions', () => {
+  const project = { ...publicationProject(publication), updateState: 'refreshing' }
+  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() {}, actionsDisabled: false }))
+  assert.match(html, />Refreshing</)
+  assert.doesNotMatch(html, />Updating<|Review 1 update|Publish notification|v2\.1|Workflow run/)
+  assert.match(html, /Health output/)
+})
 const reviewMarkup = (project) => renderToStaticMarkup(createElement(components.UpdateDialog, { project, onClose() {}, onUpdated() {} }))
 
 test('manual update review renders publication provenance, version, publication time and safe GitHub links', () => {

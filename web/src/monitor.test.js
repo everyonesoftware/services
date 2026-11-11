@@ -2,6 +2,23 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as monitor from './monitor.ts'
 
+test('terminal projects wait for fresh inventory but retain genuinely newer updates after reconciliation', () => {
+  const site = project('site', [container({ updateAvailable: true })])
+  const other = project('other', [container({ updateAvailable: true })])
+  for (const state of ['complete', 'error']) {
+    const operations = [{ id: 'done', project: 'site', state }]
+    const pending = monitor.projectsWithOperations([site, other], operations, true)
+    assert.equal(pending[0].updateState, 'refreshing')
+    assert.equal(monitor.projectHealthStatus(pending[0]), 'refreshing')
+    assert.deepEqual(monitor.availableServices(pending[0]), [])
+    assert.equal(monitor.canUpdateProject(pending[0]), false)
+    assert.deepEqual(monitor.selectProjects(pending, '', 'updates').map(p => p.name), ['other'])
+    assert.equal(monitor.availableServices(monitor.projectsWithOperations([site], operations, false)[0]).length, 1)
+    assert.equal(monitor.projectsWithOperations([site], [...operations, { project: 'site', state: 'running' }], true)[0].updateState, 'running')
+  }
+  assert.equal(site.updateState, undefined)
+})
+
 const container = (changes = {}) => ({ id: 'a', name: 'web-1', project: 'site', service: 'web', image: 'nginx:stable', state: 'running', health: 'healthy', monitorStatus: 'healthy', ...changes })
 const project = (name, containers, status = 'healthy') => ({ name, containers, status })
 

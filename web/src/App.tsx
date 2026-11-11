@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { checkForUpdates, undoResolution } from './api.ts'
-import { availableServices, connectionState, isSnoozed, needsAttention, projectsWithOperations, recentEvents, selectProjects } from './monitor.ts'
+import { availableServices, canUpdateProject, connectionState, isSnoozed, needsAttention, projectsWithOperations, recentEvents, selectProjects } from './monitor.ts'
 import type { Filter, IconList, Incident, Monitor, Operation, Project } from './types.ts'
 import { resolutionEntries } from './resolution.ts'
 import { ResolutionDialog } from './ResolutionDialog.tsx'
@@ -18,15 +18,15 @@ export { ProjectGroup, UpdateDialog, DockerActivity }
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed'
 const timeLabel = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Not yet checked'
 
-function usePolling<T>(url: string, interval: number, paused = false, onReceived?: (next: T) => void) {
-  const [data, setData] = useState<T | null>(null)
+function usePolling<T>(url: string, interval: number, paused = false, onReceived?: (next: T) => void, refreshKey = '') {
+  const [snapshot, setSnapshot] = useState<{ data: T | null; key: string | null }>({ data: null, key: null })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [revision, setRevision] = useState(0)
   const generation = useRef(0)
   const invalidate = useCallback(() => { generation.current++ }, [])
   const refresh = useCallback(() => { generation.current++; setRevision(value => value + 1) }, [])
-  const replace = useCallback((next: T) => { setData(next); setError('') }, [])
+  const replace = useCallback((next: T) => { setSnapshot(current => ({ ...current, data: next })); setError('') }, [])
   useEffect(() => {
     if (paused) return
     let active = true
@@ -42,7 +42,8 @@ function usePolling<T>(url: string, interval: number, paused = false, onReceived
         const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
         if (!response.ok) throw new Error((await response.text()).trim() || `Request failed (${response.status})`)
         const next = await response.json() as T
-        if (active && requestGeneration === generation.current) { setData(next); setError(''); onReceived?.(next) }
+        // Only the key captured when this request started can be reconciled by it.
+        if (active && requestGeneration === generation.current) { setSnapshot({ data: next, key: refreshKey }); setError(''); onReceived?.(next) }
       } catch (cause) {
         if (active && requestGeneration === generation.current) setError(cause instanceof DOMException && cause.name === 'AbortError' ? 'Request timed out' : errorMessage(cause))
       } finally {
@@ -54,8 +55,8 @@ function usePolling<T>(url: string, interval: number, paused = false, onReceived
     void poll()
     const timer = window.setInterval(poll, interval)
     return () => { active = false; window.clearInterval(timer); controller?.abort() }
-  }, [url, interval, revision, paused, onReceived])
-  return { data, error, loading, refresh, replace, invalidate }
+  }, [url, interval, revision, paused, onReceived, refreshKey])
+  return { data: snapshot.data, dataKey: snapshot.key, refreshing: snapshot.key !== refreshKey, error, loading, refresh, replace, invalidate }
 }
 
 type AppProps = { user?: { username: string }; onAccounts?: () => void; onPublishers?: () => void; onLogout?: () => void; sessionError?: string }
@@ -69,7 +70,7 @@ export default function App({ user, onAccounts, onPublishers, onLogout, sessionE
   // Pause only icon polling during editing so an older response cannot overwrite a verified mutation.
   const iconsRequest = usePolling<IconList>('/api/icons', 30_000, iconTarget !== null)
   const iconsAvailable = iconsRequest.data?.available === true && !iconsRequest.error
-  const projectsRequest = usePolling<{ projects: Project[] }>('/api/projects', 30_000, resolutionPending || undoPending)
+
   const monitorRequest = usePolling<Monitor>('/api/monitor', 15_000, resolutionPending || undoPending)
   const [acceptedOperations, setAcceptedOperations] = useState<Operation[]>([])
   const receivedOperations = useCallback((next: { operations: Operation[] }) => {
@@ -79,10 +80,10 @@ export default function App({ user, onAccounts, onPublishers, onLogout, sessionE
   const polledOperations = operationsRequest.data?.operations
   const operations = [...(polledOperations ?? []), ...acceptedOperations.filter(accepted => !polledOperations?.some(operation => operation.id === accepted.id))]
   const engineBusy = operations.some(operation => operation.state === 'running' || operation.state === 'queued')
-  const finishedOperations = operations.filter(operation => operation.state === 'complete' || operation.state === 'error').map(operation => operation.id).join(',')
-  const refreshProjects = projectsRequest.refresh
+  const finishedOperations = operations.filter(operation => operation.state === 'complete' || operation.state === 'error').map(operation => operation.id).sort().join(',')
+  const projectsRequest = usePolling<{ projects: Project[] }>('/api/projects', 30_000, resolutionPending || undoPending, undefined, finishedOperations)
   const refreshMonitor = monitorRequest.refresh
-  useEffect(() => { if (finishedOperations) { refreshProjects(); refreshMonitor() } }, [finishedOperations, refreshProjects, refreshMonitor])
+  useEffect(() => { if (finishedOperations) refreshMonitor() }, [finishedOperations, refreshMonitor])
   const [now, setNow] = useState(() => Date.now())
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
@@ -90,7 +91,11 @@ export default function App({ user, onAccounts, onPublishers, onLogout, sessionE
   const [updateTarget, setUpdateTarget] = useState<Project | null>(null)
   const checkLock = useRef(false)
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
-  const projects = projectsWithOperations(projectsRequest.data?.projects ?? [], operations)
+  const projects = projectsWithOperations(projectsRequest.data?.projects ?? [], operations, projectsRequest.refreshing)
+  const currentUpdateProject = updateTarget && projects.find(project => project.name === updateTarget.name)
+  // Invalidate before committing stale review content, not in a later effect.
+  // Never replace the reviewed snapshot: a newer image requires a new review.
+  if (updateTarget && (!currentUpdateProject || !canUpdateProject(currentUpdateProject))) setUpdateTarget(null)
   const monitor = monitorRequest.data
   const error = monitorRequest.error || projectsRequest.error
   const connection = connectionState(monitor, error, now)
