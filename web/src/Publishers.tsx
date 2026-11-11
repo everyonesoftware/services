@@ -349,6 +349,6 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
             {step === 3 && plan && plan.supported && !plan.workflow?.files.length && !canApplyPlan(plan, repository, imageRepository) && !plan.problems.length && <p className="notice danger" role="alert">The returned plan does not match this selection. Go Back and request a new review.</p>}
             {step === 4 && (selectedConnection ? <PublisherConnection connection={selectedConnection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} /> : <p className="publisher-info">This connection was not present in the server’s latest response. Refresh to check its saved state.</p>)}
           </div></fieldset><PublisherFooter step={step} busy={busy} available={available} canAdvance={!!canAdvance} workflowNeeded={workflowNeeded} pendingWorkflow={!!prUrl} onBack={() => step === 0 || step === 4 ? reset() : changeStep(step - 1)} onAdvance={advance} onCancel={reset} /></div></section>}
-        <p className="publisher-explain">Push delivery · no GitHub publication polling. Existing federation is registered, not automatically provisioned. Image installation always requires confirmation.</p></>}
+        </>}
     </main>{confirmation && <PublisherConfirmation connection={confirmation.connection} action={confirmation.action} busy={busy} error={error} onCancel={() => { if (!lock.current) { setConfirmation(null); setError('') } }} onConfirm={confirmManagement} />}</AppShell>
 }
