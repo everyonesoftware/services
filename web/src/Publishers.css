@@ -4,6 +4,7 @@
 .app-navigation a[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .publishers-workspace { padding-top: 30px; }
 .publishers-workspace .page-heading { margin-bottom: 24px; align-items: flex-start; }
+.app-content .publishers-workspace .page-heading { border-bottom: 0; }
 .publishers-workspace h1 { margin-top: 5px; }
 .publishers-workspace h2 { font-size: 19px; font-weight: 600; letter-spacing: -.4px; }
 .publishers-workspace h3 { font-size: 14px; font-weight: 600; }
