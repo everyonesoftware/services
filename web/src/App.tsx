@@ -5,7 +5,7 @@ import type { Filter, IconList, Monitor, Operation, Project } from './types.ts'
 import { IconDialog } from './IconDialog.tsx'
 import type { IconEditorTarget } from './ServiceIcon.tsx'
 import './App.css'
-import { AppNavigation } from './Publishers.tsx'
+import { AppShell } from './AppShell.tsx'
 import { ProjectGroup } from './ProjectGroup.tsx'
 import { UpdateDialog } from './UpdateDialog.tsx'
 import { DockerActivity } from './DockerActivity.tsx'
@@ -51,8 +51,8 @@ function usePolling<T>(url: string, interval: number, paused = false, onReceived
   return { data, error, loading, refresh, replace }
 }
 
-type AppProps = { user?: { username: string }; onAccounts?: () => void; onPublishers?: () => void; onLogout?: () => void }
-export default function App({ user, onAccounts, onPublishers, onLogout }: AppProps = {}) {
+type AppProps = { user?: { username: string }; onAccounts?: () => void; onPublishers?: () => void; onLogout?: () => void; sessionError?: string }
+export default function App({ user, onAccounts, onPublishers, onLogout, sessionError }: AppProps = {}) {
   const [iconTarget, setIconTarget] = useState<IconEditorTarget | null>(null)
   // Pause only icon polling during editing so an older response cannot overwrite a verified mutation.
   const iconsRequest = usePolling<IconList>('/api/icons', 30_000, iconTarget !== null)
@@ -102,11 +102,9 @@ export default function App({ user, onAccounts, onPublishers, onLogout }: AppPro
 
   const headline = !connected ? connection === 'connecting' ? 'Connecting…' : 'Monitoring interrupted' : projectsRequest.loading ? 'Reading service health…' : attention || incidents.length ? 'Needs attention' : projects.length ? 'No problems detected' : 'No services'
 
-  return <>
-    <a className="skip-link" href="#services">Skip to services</a>
-    <header className="app-header"><a className="brand" href="/" aria-label="Services home"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>services<span className="brand-divider" /> <span className="product-label">Engine monitor</span></a><div className="auth-nav"><span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>{user && <span className="auth-username">{user.username}</span>}<AppNavigation active="monitor" onAccounts={onAccounts} onPublishers={onPublishers} />{onLogout && <button className="button secondary" onClick={onLogout}>Sign out</button>}</div></header>
+  return <AppShell active="monitor" user={user} onAccounts={onAccounts} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} connection={<span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>}>
     <main className="workspace">
-      <section className="page-heading"><h1>Monitor</h1><div className="heading-actions"><button className="button secondary" onClick={refresh} type="button">↻ <span>Refresh</span></button><button className="button primary" onClick={() => void check()} disabled={checking || !connected} type="button">{checking ? 'Checking images…' : 'Check for updates'}</button></div></section>
+      <section className="page-heading"><div><h1>Monitor</h1><p className="page-description">Health, containers, and image updates in one place.</p></div><div className="heading-actions"><button className="button secondary" onClick={refresh} type="button">↻ <span>Refresh</span></button><button className="button primary" onClick={() => void check()} disabled={checking || !connected} type="button">{checking ? 'Checking images…' : 'Check for updates'}</button></div></section>
       {notice && <p role={notice.error ? 'alert' : 'status'} className={`notice ${notice.error ? 'danger' : ''}`}>{notice.text}</p>}
       <section className={`health-banner ${!connected ? 'neutral' : attention || incidents.length ? 'warning' : 'good'}`} aria-label="Monitoring status"><span className="health-symbol" aria-hidden="true">{!connected ? '◌' : attention || incidents.length ? '!' : '✓'}</span><div className="health-copy"><h2>{headline}</h2><p>{!connected ? (error || monitor?.error || (connection === 'stale' ? 'Stale data shown below.' : 'Waiting for a health check.')) : `${projects.length} groups · ${projects.reduce((count, project) => count + project.containers.length, 0)} containers${attention ? ` · ${attention} groups need attention` : ''}`}</p></div><div className="health-meta"><span>Checked</span><time>{timeLabel(monitor?.lastChecked)}</time></div></section>
       <details className="monitor-details"><summary>Monitor details</summary><div className="monitor-meta"><span><i className={`tiny-dot ${connected ? 'good' : ''}`} />Health polls every 15s <span className="meta-divider">/</span> Services every 30s</span><span>{monitor ? monitor.notificationConfigured ? 'Notifications configured' : 'Notifications not configured' : 'Checking notification status…'}</span></div></details>
@@ -119,5 +117,5 @@ export default function App({ user, onAccounts, onPublishers, onLogout }: AppPro
     </main>
     {iconTarget && <IconDialog target={iconTarget} available={iconsAvailable} onClose={() => setIconTarget(null)} onSaved={(next, reset) => { iconsRequest.replace(next); setNotice({ text: reset ? 'Default icon restored.' : 'Icon saved locally.', error: false }) }} />}
     {updateTarget && <UpdateDialog key={updateTarget.name} project={updateTarget} onClose={() => setUpdateTarget(null)} onUpdated={operation => { if (operation) setAcceptedOperations(current => [...current.filter(item => item.id !== operation.id), operation]); refresh() }} engineBusy={engineBusy} />}
-  </>
+  </AppShell>
 }

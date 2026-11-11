@@ -129,7 +129,7 @@ try {
   assert.equal(await page.getByLabel('Client ID', { exact: true }).inputValue(), 'finance-client', 'refresh preserves explicitly entered draft, not a different repository saved value')
   const savesBeforeCancel = calls.filter(c => c.path === '/api/publishers/tailnet').length
   await button('Cancel setup').click()
-  await page.getByRole('heading', { name: 'Connected publishers' }).waitFor()
+  await page.getByRole('heading', { name: /^Repository connections/ }).waitFor()
   assert.equal(calls.filter(c => c.path === '/api/publishers/tailnet').length, savesBeforeCancel)
   // Re-entering the saved repository restores only its own credential.
   await button('Connect GitHub repository →').click()

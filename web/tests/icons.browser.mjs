@@ -24,6 +24,8 @@ const wait = async predicate => { for (let i = 0; i < 100; i++) { if (await pred
 await page.route('**/api/**', async route => {
   const request = route.request()
   const url = new URL(request.url())
+  if (url.pathname === '/api/auth/status') return route.fulfill({ json: { setupRequired: false } })
+  if (url.pathname === '/api/auth/me') return route.fulfill({ json: { user: { id: 'fixture-admin', username: 'Browser fixture', role: 'admin' } } })
   if (url.pathname.startsWith('/api/icons/images/')) return route.fulfill({ path: fileURLToPath(new URL('../public/icons/jellyfin.png', import.meta.url)), contentType: 'image/png' })
   const upload = url.pathname === '/api/icons/upload'
   if (url.pathname === '/api/icons' || upload) {

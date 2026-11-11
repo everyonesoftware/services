@@ -25,14 +25,13 @@ export function DockerActivity({ operations, loading, error, onAcknowledged }: {
   }
   return <section className="docker-activity" aria-labelledby="docker-activity-title">
     <div className="section-title"><h2 id="docker-activity-title">Docker activity <span className="count">{error || loading ? '—' : active.length}</span></h2><span className="section-note">{error ? 'Last observed' : 'Shared across tabs · refreshes every 2s'}</span></div>
-    <p className="activity-scope">Services-managed Compose actions only; commands started outside this application are not tracked.</p>
     {error && <p className={`notice ${selfUpdating ? '' : 'danger'}`} role={selfUpdating ? 'status' : 'alert'}>{selfUpdating ? 'Services is restarting or temporarily unreachable. Reconnecting automatically; last observed work is shown below and the result is not yet confirmed.' : `Activity unavailable: ${error}. Last observed work is shown below; current state is unknown.`}</p>}
     {interruptions.map(operation => <div className="notice danger" role="alert" key={operation.id}><strong>Queue paused — {operation.project}</strong><p>Check the project in Docker before acknowledging this uncertain result. Acknowledgement allows queued work to resume; it does not retry this operation or mark it successful.</p><button className="button secondary" type="button" disabled={!!error || !!acknowledging} onClick={() => void acknowledge(operation)}>{acknowledging === operation.id ? 'Checking worker…' : 'Acknowledge interruption'}</button></div>)}
     {recoveryError && <p className="notice danger" role="alert">{recoveryError}</p>}
     {!active.length && <p className="queue-empty" role="status">{error ? 'Unable to confirm whether work is running.' : loading ? 'Loading Docker activity…' : 'No Compose work running or queued.'}</p>}
     <div className="operation-list">{active.map(operation => <OperationRow key={operation.id} operation={operation} />)}</div>
     {history.length > 0 && <details className="operation-history"><summary>Recent operations <span className="count">{history.length}</span></summary><div className="operation-list">{history.map(operation => <OperationRow key={operation.id} operation={operation} />)}</div></details>}
-    <p className="activity-scope">One operation at a time. Queue and recent output survive Services restarts. Independent workers continue when the dashboard disconnects. Interrupted work is checked before another update starts; uncertain results are not automatically retried.</p>
+    <details className="activity-help"><summary>How Docker activity works</summary><p className="activity-scope">Services-managed Compose actions only; commands started outside this application are not tracked.</p><p className="activity-scope">One operation at a time. Queue and recent output survive Services restarts. Independent workers continue when the dashboard disconnects. Interrupted work is checked before another update starts; uncertain results are not automatically retried.</p></details>
   </section>
 }
 

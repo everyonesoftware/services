@@ -243,6 +243,15 @@ test('monitor keeps secondary information collapsed and omits promotional copy',
   assert.doesNotMatch(html, /YOUR INFRASTRUCTURE|Service health, changes|Problems first|A quieter view/)
 })
 
+test('Docker activity keeps explanatory copy collapsed without hiding live state or recovery controls', () => {
+  const html = renderToStaticMarkup(createElement(components.DockerActivity, { operations: [], loading: false, error: '' }))
+  const explanation = html.match(/<details class="activity-help"><summary>How Docker activity works<\/summary>([\s\S]*?)<\/details>/)?.[1]
+  assert.ok(explanation, 'secondary explanation belongs in a closed disclosure')
+  assert.match(explanation, /Services-managed Compose actions only/)
+  assert.match(explanation, /Queue and recent output survive Services restarts/)
+  assert.ok(html.indexOf('No Compose work running or queued.') < html.indexOf('activity-help'))
+})
+
 test('healthy rows avoid redundant health prose and duplicate container names', () => {
   const container = { ...fixture.containers[0], name: 'web', health: 'healthy', monitorStatus: 'healthy', monitorReason: 'Health check passing', updateAvailable: false }
   const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { name: 'site', containers: [container] }, onReview: () => {}, actionsDisabled: false }))

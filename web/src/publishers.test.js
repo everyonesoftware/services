@@ -397,7 +397,8 @@ test('every page shell shares Monitor / Publishers / Accounts navigation with on
     assert.ok(nav, page)
     assert.deepEqual([...nav.matchAll(/>(Monitor|Publishers|Accounts)</g)].map(match => match[1]), ['Monitor', 'Publishers', 'Accounts'])
     assert.equal((nav.match(/aria-current="page"/g) || []).length, 1)
-    assert.match(nav, new RegExp('aria-current="page"[^>]*>' + page + '<'))
+    const activeLink = [...nav.matchAll(/<a ([^>]+)>(.*?)<\/a>/g)].find(match => match[1].includes('aria-current="page"'))
+    assert.match(activeLink[2], new RegExp('>' + page + '<'))
   }
 })
 
