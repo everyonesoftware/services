@@ -260,7 +260,7 @@ test('interrupted results keep the queue pause and acknowledgement visible outsi
 test('monitor keeps secondary information collapsed and omits promotional copy', () => {
   const html = renderToStaticMarkup(createElement(components.default))
   assert.match(html, /<details class="monitor-details"><summary>Monitor details<\/summary>/)
-  assert.match(html, /<details class="activity"[^>]*><summary[^>]*>Recent activity/)
+  assert.doesNotMatch(html, /docker-activity|activity-summary|Recent activity/)
   assert.doesNotMatch(html, /YOUR INFRASTRUCTURE|Service health, changes|Problems first|A quieter view/)
 })
 
@@ -322,5 +322,14 @@ test('monitor starts honestly connecting, with accessible search and filters, no
   assert.match(html, /Check for updates/)
   assert.doesNotMatch(html, /Engine connected|All systems healthy|LIVE/)
   assert.match(html, /Loading services/)
-  assert.match(html, /Recent activity/)
+  assert.doesNotMatch(html, /Recent activity|Docker activity/)
+})
+
+test('Activity has its own navigation destination and the approved Essentials toolbar without a count or state filter', () => {
+  const html = renderToStaticMarkup(createElement(components.default, { activePage: 'activity' }))
+  assert.match(html, /<h1>Activity<\/h1>/)
+  assert.match(html, /aria-label="Search activity"/)
+  for (const label of ['Application:', 'Activity type:', 'Sort activity:']) assert.ok(html.includes(label))
+  assert.doesNotMatch(html, /More filters|activity-filter-summary|data-state-filter|Check for updates/)
+  assert.match(html, /href="#activity"[^>]*aria-current="page"/)
 })

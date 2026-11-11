@@ -11,18 +11,18 @@ const { Publishers } = await server.ssrLoadModule('/src/Publishers.tsx')
 const { AuthAccounts } = await server.ssrLoadModule('/src/AuthAccounts.tsx')
 const props = { user: { id: 'admin', username: '<Admin & user>', role: 'admin' }, onBack() {}, onAccounts() {}, onPublishers() {}, onLogout() {}, onPasswordChanged() {} }
 
-for (const [component, active] of [[App, 'monitor'], [Publishers, 'publishers'], [AuthAccounts, 'accounts']]) {
+for (const [component, active] of [[App, 'monitor'], [App, 'activity'], [Publishers, 'publishers'], [AuthAccounts, 'accounts']]) {
   test(`${active} uses the shared sidebar with branding, navigation and signed-in user footer`, () => {
-    const html = renderToStaticMarkup(createElement(component, props))
+    const html = renderToStaticMarkup(createElement(component, { ...props, activePage: active }))
     assert.match(html, /class="app-shell"/)
     const sidebar = html.match(/<aside class="app-sidebar"[^>]*>([\s\S]*?)<\/aside>/)?.[1]
     assert.ok(sidebar, 'shared sidebar must exist')
     assert.match(sidebar, /aria-label="Services home"/)
     assert.match(sidebar, /class="brand-mark"/)
     assert.doesNotMatch(sidebar, />\s*Workspace\s*</)
-    const links = [...sidebar.matchAll(/<a [^>]*href="#(monitor|publishers|accounts)"[^>]*>/g)]
+    const links = [...sidebar.matchAll(/<a [^>]*href="#(monitor|activity|publishers|accounts)"[^>]*>/g)]
       .filter(match => !match[0].includes('class="brand"'))
-    assert.deepEqual(links.map(match => match[1]), ['monitor', 'publishers', 'accounts'])
+    assert.deepEqual(links.map(match => match[1]), ['monitor', 'activity', 'publishers', 'accounts'])
     assert.equal(links.filter(match => match[0].includes('aria-current="page"')).length, 1)
     assert.ok(links.find(match => match[1] === active)[0].includes('aria-current="page"'))
     assert.match(sidebar, /class="sidebar-user"[^>]*>&lt;Admin &amp; user&gt;</)

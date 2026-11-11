@@ -34,7 +34,10 @@ export function AuthForm({ setup, onAuthenticated }: { setup: boolean; onAuthent
 
 export function AuthGate() {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const pageFromHash = (): AppPage => typeof window !== 'undefined' && window.location.hash === '#publishers' ? 'publishers' : typeof window !== 'undefined' && window.location.hash === '#accounts' ? 'accounts' : 'monitor'
+  const pageFromHash = (): AppPage => {
+    const hash = typeof window === 'undefined' ? '' : window.location.hash
+    return hash === '#activity' ? 'activity' : hash === '#publishers' ? 'publishers' : hash === '#accounts' ? 'accounts' : 'monitor'
+  }
   const [page, setPage] = useState<AppPage>(pageFromHash)
   const navigate = (next: AppPage) => { window.location.hash = next; setPage(next) }
   useEffect(() => {
@@ -81,5 +84,5 @@ export function AuthGate() {
   if (loading) return <main className="auth-shell" role="status">Checking session…</main>
   if (error && !user) return <main className="auth-shell"><section className="auth-card"><p role="alert" className="notice danger">{error}</p><button className="button secondary" onClick={() => setRevision(value => value + 1)}>Try again</button></section></main>
   if (!user) return <AuthForm key={setup ? 'setup' : 'login'} setup={setup} onAuthenticated={setUser} />
-  return page === 'accounts' ? <AuthAccounts user={user} sessionError={error} onBack={() => navigate('monitor')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} onPasswordChanged={() => { setUser(null); navigate('monitor'); setSetup(false) }} /> : page === 'publishers' ? <Publishers user={user} sessionError={error} onBack={() => navigate('monitor')} onAccounts={() => navigate('accounts')} onLogout={() => void logout()} /> : <App user={user} sessionError={error} onAccounts={() => navigate('accounts')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} />
+  return page === 'accounts' ? <AuthAccounts user={user} sessionError={error} onBack={() => navigate('monitor')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} onPasswordChanged={() => { setUser(null); navigate('monitor'); setSetup(false) }} /> : page === 'publishers' ? <Publishers user={user} sessionError={error} onBack={() => navigate('monitor')} onAccounts={() => navigate('accounts')} onLogout={() => void logout()} /> : <App activePage={page} user={user} sessionError={error} onAccounts={() => navigate('accounts')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} />
 }

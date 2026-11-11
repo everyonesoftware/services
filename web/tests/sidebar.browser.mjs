@@ -13,8 +13,8 @@ const server = await createServer({ root: fileURLToPath(new URL('../', import.me
 let browser
 const failures = []
 const user = { id: 'fixture-admin', username: 'Browser fixture', role: 'admin' }
-const routes = ['monitor', 'publishers', 'accounts']
-const labels = ['Monitor', 'Publishers', 'Accounts']
+const routes = ['monitor', 'activity', 'publishers', 'accounts']
+const labels = ['Monitor', 'Activity', 'Publishers', 'Accounts']
 const wait = async (predicate, message) => {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (await predicate()) return
@@ -100,7 +100,7 @@ async function exercise(viewport, name) {
     assert.equal(await page.evaluate(() => location.hash), `#${route}`)
     const links = nav().getByRole('link')
     assert.deepEqual(await links.evaluateAll(elements => elements.map(element => element.getAttribute('href'))), routes.map(value => `#${value}`), 'All page shells share Monitor / Publishers / Accounts link order')
-    assert.deepEqual(await links.evaluateAll((elements, expected) => elements.map((element, index) => [...element.querySelectorAll('span')].some(span => span.textContent.trim() === expected[index])), labels), [true, true, true], 'Each navigation label has a text span; decorative spans are allowed')
+    assert.deepEqual(await links.evaluateAll((elements, expected) => elements.map((element, index) => [...element.querySelectorAll('span')].some(span => span.textContent.trim() === expected[index])), labels), labels.map(() => true), 'Each navigation label has a text span; decorative spans are allowed')
     assert.equal(await nav().locator('[aria-current]').count(), 1, 'Exactly one link has aria-current')
     assert.equal(await nav().locator('[aria-current]').getAttribute('href'), `#${route}`)
     assert.equal(await nav().locator('[aria-current]').getAttribute('aria-current'), 'page')
@@ -129,7 +129,9 @@ async function exercise(viewport, name) {
     // Navigation only: no add-user, key, publisher, or service mutation is permitted.
     assert.deepEqual(mutations, [])
     await page.goBack(); await assertPage('publishers'); await markerSurvives()
+    await page.goBack(); await assertPage('activity'); await markerSurvives()
     await page.goBack(); await assertPage('monitor'); await markerSurvives()
+    await page.goForward(); await assertPage('activity'); await markerSurvives()
     await page.goForward(); await assertPage('publishers'); await markerSurvives()
     await page.goForward(); await assertPage('accounts'); await markerSurvives()
 

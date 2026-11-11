@@ -29,7 +29,9 @@ In Docker, use the existing container's `/app/services` executable via `docker e
 
 ## Monitoring
 
-Monitoring runs on the server, not in a browser tab. The dashboard shows active incidents, container diagnostics, and recent changes.
+Monitoring runs on the server, not in a browser tab. **Monitor** shows active incidents, container diagnostics, service controls, and image updates. **Activity** combines Services-managed Compose operations and recent monitor events in one feed.
+
+Activity has an always-visible search field and icon dropdowns for application, activity type, and sorting. Hover a dropdown for its current selection, or use the accessible keyboard controls. Newest/oldest sorting uses the operation's finished time, otherwise its started or queued time; monitor events use their observed time. Longest/shortest compares execution runtime, not queue wait. Running operations show elapsed time so far; queued work, point-in-time monitor events, and uncertain interrupted results have no comparable runtime and are excluded from duration sorting with an explanation. Search and filters do not hide queue-pause warnings or interruption acknowledgement. Command output, raw output, and follow-output controls remain available by expanding an operation. Compose operations refresh every two seconds and monitor events every fifteen seconds.
 
 - Docker health checks are used when configured. A failed check is a problem even while the process is running.
 - Without a health check, Services monitors container state and restart activity. **Running** means the process is up; it does not claim the application is responding correctly.

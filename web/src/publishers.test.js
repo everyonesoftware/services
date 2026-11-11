@@ -393,16 +393,16 @@ test('GitHub handoff accepts explicit HTTPS GitHub consent and installation dest
   assert.equal(api.githubInstallUrl('https://evil.test/apps/services/installations/new'), false)
 })
 
-test('every page shell shares Monitor / Publishers / Accounts navigation with one correct current page', async () => {
+test('every page shell shares Monitor / Activity / Publishers / Accounts navigation with one correct current page', async () => {
   assert.equal(typeof ui.Publishers, 'function')
   const { default: App } = await server.ssrLoadModule('/src/App.tsx')
   const { AuthAccounts } = await server.ssrLoadModule('/src/AuthAccounts.tsx')
   const props = { user: { id: 'admin', username: 'admin', role: 'admin' }, onBack() {}, onAccounts() {}, onPublishers() {}, onLogout() {}, onPasswordChanged() {} }
-  for (const [component, page] of [[App, 'Monitor'], [ui.Publishers, 'Publishers'], [AuthAccounts, 'Accounts']]) {
-    const html = renderToStaticMarkup(createElement(component, props))
+  for (const [component, page] of [[App, 'Monitor'], [App, 'Activity'], [ui.Publishers, 'Publishers'], [AuthAccounts, 'Accounts']]) {
+    const html = renderToStaticMarkup(createElement(component, { ...props, activePage: page.toLowerCase() }))
     const nav = html.match(/<nav[^>]*aria-label="Main navigation"[^>]*>(.*?)<\/nav>/)?.[1]
     assert.ok(nav, page)
-    assert.deepEqual([...nav.matchAll(/>(Monitor|Publishers|Accounts)</g)].map(match => match[1]), ['Monitor', 'Publishers', 'Accounts'])
+    assert.deepEqual([...nav.matchAll(/>(Monitor|Activity|Publishers|Accounts)</g)].map(match => match[1]), ['Monitor', 'Activity', 'Publishers', 'Accounts'])
     assert.equal((nav.match(/aria-current="page"/g) || []).length, 1)
     const activeLink = [...nav.matchAll(/<a ([^>]+)>(.*?)<\/a>/g)].find(match => match[1].includes('aria-current="page"'))
     assert.match(activeLink[2], new RegExp('>' + page + '<'))
