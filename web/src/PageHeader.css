@@ -1,0 +1,47 @@
+/* Outrank the shell's base/mobile headings regardless of import order. */
+.app-content .page-heading.unified-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0 0 16px;
+  border: 0;
+}
+
+.app-content .page-heading.unified-page-header h1 {
+  margin: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  color: #25332b;
+}
+
+.app-content .page-heading.unified-page-header .heading-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+}
+
+.unified-page-header .button { min-height: 44px; }
+
+@media (max-width: 640px) {
+  .app-content .page-heading.unified-page-header {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .app-content .page-heading.unified-page-header .heading-actions {
+    flex-basis: 100%;
+  }
+}

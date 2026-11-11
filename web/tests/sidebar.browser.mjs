@@ -95,7 +95,7 @@ async function exercise(viewport, name) {
     const heading = content.getByRole('heading', { level: 1 })
     await wait(async () => {
       const text = (await heading.allTextContents()).map(value => value.trim())
-      return text.length === 1 && (route === 'publishers' ? /^(Image publishers|Publishers)$/.test(text[0]) : text[0] === labels[routes.indexOf(route)])
+      return text.length === 1 && (route === 'publishers' ? /^(Image publishers|Publishers)$/.test(text[0]) : text[0] === (route === 'monitor' ? 'Services' : labels[routes.indexOf(route)]))
     }, `${route}: expected its page title inside .app-content`)
     assert.equal(await page.evaluate(() => location.hash), `#${route}`)
     const links = nav().getByRole('link')

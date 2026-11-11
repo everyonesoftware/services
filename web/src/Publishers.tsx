@@ -5,6 +5,7 @@ import type { Connection, GitHubStart, PublisherPlan, PublisherStatus, Repositor
 import type { AuthUser } from './authApi.ts'
 import './Publishers.css'
 import { AppShell } from './AppShell.tsx'
+import { PageHeader } from './PageHeader.tsx'
 
 export type { AppPage } from './AppShell.tsx'
 export { AppNavigation } from './AppShell.tsx'
@@ -366,7 +367,7 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
   const canAdvance = step === 0 ? readyForRepositories : step === 1 ? !!repository && !imageRepositoryProblem(imageRepository) : step === 2 ? !!guidance?.subject && [tailnet.clientId, tailnet.audience, tailnet.tags].every(value => !!value && !/\s/.test(value)) : step === 3 ? !!prUrl || workflowNeeded || canApplyPlan(plan, repository, imageRepository) : false
 
   return <AppShell active="publishers" user={user} onMonitor={onBack} onAccounts={onAccounts} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
-    <main className={`workspace publishers-workspace${step === null ? '' : ' publisher-setup-workspace'}`} id="publishers-content"><section className="page-heading"><div><h1>{step === null ? 'Publishers' : 'Connect an image publisher'}</h1>{step !== null && <p className="publisher-muted">Receive image updates directly from your publishing workflows.</p>}</div><div className="heading-actions"><button className="button secondary" disabled={busy || loading} onClick={refreshStatus}>Refresh</button>{step === null && <button className="button primary" disabled={busy || loading || !savedStatus?.available} onClick={() => changeStep(0)}>Connect repository</button>}</div></section>
+    <main className={`workspace publishers-workspace${step === null ? '' : ' publisher-setup-workspace'}`} id="publishers-content"><PageHeader title={step === null ? 'Publishers' : 'Connect an image publisher'} actions={<><button className="button secondary" disabled={busy || loading} onClick={refreshStatus}>Refresh</button>{step === null && <button className="button primary" disabled={busy || loading || !savedStatus?.available} onClick={() => changeStep(0)}>Connect repository</button>}</>} />
       {error && <p className="notice danger" role="alert">{error}</p>}
       {loading && <p className="publisher-loading" role="status">Loading publisher configuration…</p>}
       {!status && !loading && <section className="publisher-panel publisher-empty"><h2>Publishers couldn’t be loaded</h2><p>Check your connection and use Refresh to try again.</p></section>}

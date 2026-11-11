@@ -257,9 +257,12 @@ test('interrupted results keep the queue pause and acknowledgement visible outsi
   assert.match(stale, /disabled=""[^>]*>Acknowledge interruption/)
 })
 
-test('monitor keeps secondary information collapsed and omits promotional copy', () => {
+test('monitor omits routine summary and details while retaining its service workspace', () => {
   const html = renderToStaticMarkup(createElement(components.default))
-  assert.match(html, /<details class="monitor-details"><summary>Monitor details<\/summary>/)
+  assert.doesNotMatch(html, /monitor-details|health-banner|page-description/)
+  assert.match(html, /<h1[^>]*>Services<\/h1>/)
+  assert.match(html, /class="sticky-panel"/)
+  assert.match(html, /Service filter: All services/)
   assert.doesNotMatch(html, /docker-activity|activity-summary|Recent activity/)
   assert.doesNotMatch(html, /YOUR INFRASTRUCTURE|Service health, changes|Problems first|A quieter view/)
 })
@@ -315,7 +318,7 @@ test('image artwork is contained and neutral SVG viewports retain breathing room
 
 test('monitor starts honestly connecting, with accessible search and filters, not a connected claim or fabricated counts', () => {
   const html = renderToStaticMarkup(createElement(components.default))
-  assert.match(html, /<h1>Monitor<\/h1>/)
+  assert.match(html, /<h1[^>]*>Services<\/h1>/)
   assert.match(html, /Connecting/)
   assert.match(html, /Search services/)
   assert.match(html, /Needs attention/)

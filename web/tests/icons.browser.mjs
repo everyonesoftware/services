@@ -230,12 +230,12 @@ try {
   icons = [{ kind: 'project', key: 'media', url: '/api/icons/images/project.png', sourceUrl: '' }]
   available = false
   await page.reload()
-  await page.getByText('No problems detected', { exact: true }).waitFor()
+  await page.locator('.project-group').waitFor()
   assert.equal(await page.locator('.icon-button').count(), 0)
   assert.equal(await page.locator('.project-list .service-icon').count(), 2)
   iconFailure = true
   await page.reload()
-  await page.getByText('No problems detected', { exact: true }).waitFor()
+  await page.locator('.project-group').waitFor()
   assert.equal(await page.locator('.icon-button').count(), 0)
   assert.equal(await page.locator('.project-group').count(), 1)
   // Exercise image loading failure through the real shared renderer.

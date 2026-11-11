@@ -120,7 +120,7 @@ async function exercise(viewport) {
   }
   try {
     await page.goto(`${server.resolvedUrls.local[0]}#monitor`)
-    await page.getByRole('heading', { level: 1, name: 'Monitor', exact: true }).waitFor()
+    await page.getByRole('heading', { level: 1, name: 'Services', exact: true }).waitFor()
     assert.equal(await page.locator('.docker-activity,.activity-summary,.activity-feed').count(), 0, 'Activity is removed from Monitor')
     await page.getByRole('link', { name: 'Activity', exact: true }).click()
     await page.getByRole('heading', { level: 1, name: 'Activity', exact: true }).waitFor()
@@ -130,7 +130,7 @@ async function exercise(viewport) {
     assert.equal(await page.getByRole('searchbox', { name: 'Search activity', exact: true }).isVisible(), true)
     assert.equal(await page.locator('.unified-activity > .page-heading').evaluate(element => getComputedStyle(element).borderBottomWidth), '0px', 'No divider bar between the Activity title and filter panel')
     assert.equal(await page.locator('.activity-filters select,.activity-filter-summary,[data-state-filter]').count(), 0)
-    assert.equal(await page.locator('.activity-filters').evaluate(element => element.nextElementSibling.className), 'activity-feed', 'Feed directly follows toolbar without a visible count or scope row')
+    assert.equal(await page.locator('.sticky-panel').evaluate(element => element.nextElementSibling.className), 'activity-feed', 'Feed directly follows sticky toolbar without a visible count or scope row')
     const buttons = page.locator('.activity-filters [aria-haspopup=menu]')
     assert.equal(await buttons.count(), 3)
     assert.deepEqual(await buttons.evaluateAll(elements => elements.map(element => element.textContent.trim())), ['', '', ''])
@@ -215,7 +215,7 @@ async function exercise(viewport) {
     await page.getByRole('heading', { level: 1, name: 'Activity', exact: true }).waitFor()
     await wait(async () => (await ids()).length === 8)
     await page.getByRole('link', { name: 'Monitor', exact: true }).click()
-    await page.getByRole('heading', { level: 1, name: 'Monitor', exact: true }).waitFor()
+    await page.getByRole('heading', { level: 1, name: 'Services', exact: true }).waitFor()
     assert.equal(await page.locator('.activity-feed,.docker-activity,.activity-summary').count(), 0)
     assert.equal(await page.getByRole('button', { name: 'Check for updates', exact: true }).isVisible(), true)
     assert.deepEqual(errors, [])

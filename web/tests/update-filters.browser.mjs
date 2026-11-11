@@ -15,7 +15,11 @@ let submissions = 0
 let rejectUpdate = false
 const operation = { id: 'update-1', project: 'media', action: 'update', state: 'queued', queuedAt: new Date().toISOString(), messages: [] }
 const wait = async predicate => { for (let i = 0; i < 150; i++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 20)) } throw new Error('Timed out waiting for assertion') }
-const filter = name => page.getByRole('button', { name: new RegExp(`^${name}`) })
+const filter = name => page.getByRole('menuitemradio', { name: new RegExp(`^${name}`), includeHidden: true })
+const chooseFilter = async name => {
+  await page.getByRole('button', { name: /^Service filter:/ }).click()
+  await filter(name).click()
+}
 const refresh = async () => { await page.getByRole('button', { name: /Refresh/ }).click() }
 await page.route('**/api/**', async route => {
   const path = new URL(route.request().url()).pathname
@@ -33,16 +37,16 @@ await page.route('**/api/**', async route => {
 })
 try {
   await page.goto(server.resolvedUrls.local[0])
-  await filter('Updates').click()
+  await chooseFilter('Updates')
   await page.locator('.group-summary').click()
   await page.getByRole('button', { name: /Review 1 update/ }).click()
   await page.getByRole('button', { name: 'Confirm & update', exact: true }).click()
   await page.locator('.update-dialog').waitFor({ state: 'detached' })
   // The operations poll intentionally still reports nothing: acceptance alone must move the project.
   await wait(() => page.locator('.project-group').count().then(count => count === 0))
-  assert.equal(await filter('Updates').textContent(), 'Updates0')
-  assert.equal(await filter('Needs attention').textContent(), 'Needs attention1')
-  await filter('Needs attention').click()
+  assert.match(await filter('Updates').textContent(), /Updates \(0\)/)
+  assert.match(await filter('Needs attention').textContent(), /Needs attention \(1\)/)
+  await chooseFilter('Needs attention')
   await page.locator('.group-signals .status-badge').getByText('Queued', { exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: /Review .*update/ }).count(), 0)
   assert.equal(submissions, 1)
@@ -50,7 +54,7 @@ try {
   await refresh()
   await page.locator('.group-signals .status-badge').getByText('Updating', { exact: true }).waitFor()
   await page.reload()
-  await filter('Needs attention').click()
+  await chooseFilter('Needs attention')
   await page.locator('.group-signals .status-badge').getByText('Updating', { exact: true }).waitFor()
   await page.setViewportSize({ width: 390, height: 800 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -58,8 +62,8 @@ try {
   // A failed update releases the gate and permits manual retry if an image is still available.
   operations = [{ ...operation, state: 'error', error: 'Fixture failure', needsAttention: true }]
   await refresh()
-  await wait(() => filter('Updates').textContent().then(text => text === 'Updates1'))
-  await filter('Updates').click()
+  await wait(() => filter('Updates').textContent().then(text => /Updates \(1\)/.test(text)))
+  await chooseFilter('Updates')
   await page.locator('.group-summary').click()
   assert.equal(await page.getByRole('button', { name: /Review 1 update/ }).isEnabled(), true)
   rejectUpdate = true
@@ -71,9 +75,9 @@ try {
   operations = [{ ...operation, state: 'complete' }]
   updateAvailable = false
   await refresh()
-  await wait(() => filter('Updates').textContent().then(text => text === 'Updates0'))
-  assert.equal(await filter('Needs attention').textContent(), 'Needs attention0')
-  await filter('All').click()
+  await wait(() => filter('Updates').textContent().then(text => /Updates \(0\)/.test(text)))
+  assert.match(await filter('Needs attention').textContent(), /Needs attention \(0\)/)
+  await chooseFilter('All services')
   await page.locator('.group-signals .status-badge').getByText('Healthy', { exact: true }).waitFor()
   operations = []
   await refresh()

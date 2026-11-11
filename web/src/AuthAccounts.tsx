@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { authRequest } from './authApi.ts'
 import { AppShell } from './AppShell.tsx'
+import { PageHeader } from './PageHeader.tsx'
 import type { ApiKey, AuthUser } from './authApi.ts'
 
 import { canDeleteUser, keyPayload } from './authAccountModel.ts'
@@ -65,7 +66,7 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
     })
   }
   return <AppShell active="accounts" user={user} onMonitor={onBack} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
-    <main className="workspace accounts-workspace"><section className="page-heading"><div><h1>Accounts</h1><p className="page-description">Manage administrator access and API credentials.</p></div><button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button></section>
+    <main className="workspace accounts-workspace"><PageHeader title="Accounts" actions={<button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button>} />
     {error && <p role="alert" className="notice danger">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
     <nav className="account-sections" aria-label="Account sections">{['Administrators', 'API keys', 'Password'].map(name => <button type="button" key={name} aria-pressed={section === name} disabled={busy} onClick={() => setSection(name)}>{name}</button>)}</nav>
     <div className="accounts-grid"><section className="auth-card" aria-labelledby="admins-title" hidden={section !== 'Administrators'}><h2 id="admins-title">Administrators</h2><p className="auth-help">All administrator accounts have full access. Your current account and the last administrator cannot be deleted.</p>
