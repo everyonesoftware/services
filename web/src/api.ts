@@ -1,4 +1,34 @@
-import type { Icon, IconList, IconTarget, Operation, UpdateEvent } from './types.ts'
+import type { Icon, IconList, IconTarget, Operation, ResolutionDecision, UpdateEvent } from './types.ts'
+
+async function resolutionRequest<T>(path: string, body: unknown, read: (response: Response) => Promise<T>, fetcher: typeof fetch, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('Request timed out; the outcome is unconfirmed. Refresh monitoring before retrying.'))
+      controller.abort()
+    }, timeoutMs)
+  })
+  const request = async () => {
+    const response = await fetcher(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal })
+    if (!response.ok) throw new Error((await response.text()).trim() || `Resolution request failed (${response.status})`)
+    return await read(response)
+  }
+  try { return await Promise.race([request(), timeout]) }
+  finally { clearTimeout(timer) }
+}
+
+export function resolveIncidents(decisions: ResolutionDecision[], fetcher: typeof fetch = fetch, timeoutMs = 15_000): Promise<{ undoToken: string }> {
+  return resolutionRequest('/api/monitor/resolve', { decisions }, async response => {
+    const result = await response.json() as { undoToken: string }
+    if (!result || typeof result.undoToken !== 'string' || !result.undoToken) throw new Error('Missing Undo token; the outcome is unconfirmed. Refresh monitoring before retrying.')
+    return result
+  }, fetcher, timeoutMs)
+}
+
+export function undoResolution(token: string, fetcher: typeof fetch = fetch, timeoutMs = 15_000): Promise<void> {
+  return resolutionRequest('/api/monitor/undo', { token }, async () => {}, fetcher, timeoutMs)
+}
 
 async function iconRequest<T>(url: string, options: RequestInit, fetcher: typeof fetch, timeoutMs: number): Promise<T> {
   const controller = new AbortController()

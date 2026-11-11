@@ -39,6 +39,20 @@ Monitoring runs on the server, not in a browser tab. The dashboard shows active 
 - Docker outages are shown separately from application failures. The last successful inventory stays visible and is marked stale; it is not presented as a live healthy result.
 - Active incidents and recent history are in memory. They reset when Services restarts. Polling is not an exhaustive Docker event log: containers created and removed entirely between polls may not be observed.
 
+### Resolving missing services
+
+When a previously observed service disappears, choose **Resolve…** on its missing incident or container row. The same dialog combines the disappearance details, observed history, and possible replacement suggestions with the resolution decision. Suggestions use current services in the same project with a matching image reference; they are not proof that a rename occurred.
+
+- **Renamed or replaced:** confirm the current replacement. Services records the relationship in activity history and clears the old missing monitoring entry. It does not rename a Docker container.
+- **Intentionally removed:** forget the old monitoring expectation and clear its incident. If that identity returns later, Services discovers and monitors it again.
+- **Not sure yet:** snooze that entry's alerts for 15 minutes, one hour, or 24 hours. The service stays visibly missing, but does not count as an active unsnoozed alert. Other services' alerts are unaffected. Alerting resumes if it remains missing when the snooze expires.
+
+**Resolve both/all missing entries…** opens the same experience for bulk handling. Apply one choice to all selected entries, override individual decisions, or exclude entries before applying. Each batch supports up to 100 selected entries. No changes are made until confirmation, and the entire batch is rejected if an entry's observed state has changed. The server checks fresh Docker inventory rather than trusting the browser's cached view.
+
+After a successful decision, **Undo** can restore the previous monitoring expectations for up to five minutes, provided those identities have not returned or been changed by a later decision. Resolution and Undo require an administrator session and same-origin checks; read-only and publisher API keys cannot use them. These actions never pull images, run Compose, restart containers, or delete containers, files, or volumes.
+
+Monitoring history, resolutions, snoozes, and Undo tokens are in memory, like the existing monitoring snapshot, and reset when Services restarts. They are not a durable incident journal.
+
 ### Service icons
 
 Project and container names have small, locally bundled official GitHub organization avatars or application artwork, with light gray circular backgrounds. Asset provenance is recorded in `web/public/icons/sources.json`. No external image requests or runtime logo-search service are used while displaying icons.

@@ -123,6 +123,8 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 	s.mux.HandleFunc("POST /api/operations/{id}/acknowledge", s.acknowledge)
 	s.mux.HandleFunc("GET /api/projects", s.projects)
 	s.mux.HandleFunc("GET /api/monitor", s.monitorInfo)
+	s.mux.HandleFunc("POST /api/monitor/resolve", s.resolveMissing)
+	s.mux.HandleFunc("POST /api/monitor/undo", s.undoMissingResolution)
 	s.mux.HandleFunc("POST /api/projects/{name}/update", s.projectUpdate)
 	s.mux.HandleFunc("POST /api/updates/check", s.checkUpdates)
 	s.mux.HandleFunc("POST /api/images/published", s.imagePublished)

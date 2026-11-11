@@ -62,7 +62,14 @@ export function containerStatus(container: Container): string {
 }
 
 export function needsAttention(project: Project): boolean {
+  if (!project.updateState && project.containers.some(c => containerStatus(c) === 'missing' && isSnoozed(c.monitorSnoozedUntil))) {
+    return project.containers.some(c => !(containerStatus(c) === 'missing' && isSnoozed(c.monitorSnoozedUntil)) && statusSeverity(containerStatus(c)) >= 2)
+  }
   return statusSeverity(projectHealthStatus(project)) >= 2
+}
+
+export function isSnoozed(until?: string, now = Date.now()): boolean {
+  return !!until && Date.parse(until) > now
 }
 
 export function statusSeverity(status: string): number {

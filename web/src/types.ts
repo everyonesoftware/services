@@ -22,6 +22,7 @@ export type Container = {
   state: string
   health?: string
   monitorStatus?: string
+  monitorSnoozedUntil?: string
   monitorReason?: string
   restartCount?: number
   startedAt?: string
@@ -37,7 +38,9 @@ export type Container = {
   updatePublication?: ImagePublication
 }
 export type Project = { name: string; status: string; updateAvailable?: boolean; updateState?: 'queued' | 'running'; containers: Container[] }
-export type Incident = { id: string; project: string; service: string; name: string; status: string; reason: string; since: string }
+export type Incident = { id: string; project: string; service: string; name: string; status: string; reason: string; since: string; snoozedUntil?: string }
+export type ResolutionAction = 'forget' | 'replace' | 'snooze'
+export type ResolutionDecision = { incidentId: string; since: string; action: ResolutionAction; replacementId?: string; snoozeSeconds?: 900 | 3600 | 86400; snoozedUntil?: string }
 export type MonitorEvent = { id: string; project: string; name: string; kind: string; message: string; time: string }
 export type Monitor = { connected: boolean; lastChecked: string | null; error: string | null; incidents: Incident[]; events: MonitorEvent[]; notificationConfigured: boolean }
 export type UpdateEvent = { type: 'accepted' | 'progress' | 'complete' | 'error'; message: string; operationId?: string }

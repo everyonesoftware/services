@@ -31,18 +31,19 @@ type ImagePublication struct {
 
 // Container is the Docker data needed for project health and image-update status.
 type Container struct {
-	UpdatePublication *ImagePublication `json:"updatePublication,omitempty"`
-	UpdateStatus      string            `json:"updateStatus,omitempty"`
-	UpdateError       string            `json:"updateError,omitempty"`
-	UpdateCheckedAt   string            `json:"updateCheckedAt,omitempty"`
-	RestartCount      int               `json:"restartCount"`
-	StartedAt         string            `json:"startedAt,omitempty"`
-	ExitCode          int               `json:"exitCode"`
-	OOMKilled         bool              `json:"oomKilled"`
-	HealthOutput      string            `json:"healthOutput,omitempty"`
-	OneShot           bool              `json:"oneShot,omitempty"`
-	MonitorStatus     string            `json:"monitorStatus,omitempty"`
-	MonitorReason     string            `json:"monitorReason,omitempty"`
+	UpdatePublication   *ImagePublication `json:"updatePublication,omitempty"`
+	UpdateStatus        string            `json:"updateStatus,omitempty"`
+	UpdateError         string            `json:"updateError,omitempty"`
+	UpdateCheckedAt     string            `json:"updateCheckedAt,omitempty"`
+	RestartCount        int               `json:"restartCount"`
+	StartedAt           string            `json:"startedAt,omitempty"`
+	ExitCode            int               `json:"exitCode"`
+	OOMKilled           bool              `json:"oomKilled"`
+	HealthOutput        string            `json:"healthOutput,omitempty"`
+	OneShot             bool              `json:"oneShot,omitempty"`
+	MonitorStatus       string            `json:"monitorStatus,omitempty"`
+	MonitorReason       string            `json:"monitorReason,omitempty"`
+	MonitorSnoozedUntil string            `json:"monitorSnoozedUntil,omitempty"`
 
 	ID                      string   `json:"id"`
 	Name                    string   `json:"name"`

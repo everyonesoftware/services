@@ -10,6 +10,19 @@ after(() => server.close())
 const components = await server.ssrLoadModule('/src/App.tsx')
 const fixture = { name: 'site', status: 'unhealthy', containers: [{ id: 'web', name: 'site-web-1', project: 'site', service: 'web', image: 'nginx:stable', state: 'running', health: 'unhealthy', monitorStatus: 'unhealthy', monitorReason: 'Probe failed', restartCount: 4, healthOutput: 'Connection refused <script>', updateAvailable: true, currentDigest: 'sha256:old', proposedDigest: 'sha256:new' }] }
 
+test('missing container rows expose one optional Resolve callback without replacing icons or update review', () => {
+  const missing = { ...fixture, containers: [{ ...fixture.containers[0], monitorStatus: 'missing', state: 'missing', monitorSnoozedUntil: '2099-01-01T00:00:00Z' }] }
+  const props = { project: missing, onReview() {}, actionsDisabled: false, onResolve() {} }
+  const html = renderToStaticMarkup(createElement(components.ProjectGroup, props))
+  assert.match(html, /Resolve…/)
+  assert.match(html, /Missing · Snoozed/)
+  assert.match(html, /Review 1 update/)
+  assert.match(html, /class="service-icon/)
+  assert.doesNotMatch(html, /Investigate/)
+  const absent = renderToStaticMarkup(createElement(components.ProjectGroup, { ...props, onResolve: undefined }))
+  assert.doesNotMatch(absent, /Resolve…/)
+})
+
 test('project and container icons share a light gray circular background without cropping artwork', () => {
   const css = readFileSync(new URL('./App.css', import.meta.url), 'utf8')
   const iconStyle = css.match(/\.service-icon\s*\{([^}]+)\}/)[1]

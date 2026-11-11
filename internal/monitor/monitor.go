@@ -22,21 +22,23 @@ type Notifier interface {
 	Notify(context.Context, Event) error
 }
 type Incident struct {
-	ID      string `json:"id"`
-	Project string `json:"project"`
-	Service string `json:"service"`
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Since   string `json:"since"`
+	ID           string `json:"id"`
+	Project      string `json:"project"`
+	Service      string `json:"service"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Reason       string `json:"reason"`
+	Since        string `json:"since"`
+	SnoozedUntil string `json:"snoozedUntil,omitempty"`
 }
 type Event struct {
-	ID      string `json:"id"`
-	Project string `json:"project"`
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
-	Time    string `json:"time"`
+	incidentID string // internal correlation, never included in webhook payloads
+	ID         string `json:"id"`
+	Project    string `json:"project"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Message    string `json:"message"`
+	Time       string `json:"time"`
 }
 type Snapshot struct {
 	Connected              bool       `json:"connected"`
@@ -65,6 +67,8 @@ type Monitor struct {
 	interval     time.Duration
 	pending      []Event
 	engineFailed bool
+	resolutions  map[string]resolutionUndo
+	revisions    map[string]uint64
 }
 
 func New(source ContainerSource, notifier Notifier) *Monitor {
@@ -112,6 +116,11 @@ func cloneContainers(in []groups.Container) []groups.Container {
 	for i := range out {
 		out[i].RepoDigests = append([]string(nil), in[i].RepoDigests...)
 		out[i].ComposeConfigFiles = append([]string(nil), in[i].ComposeConfigFiles...)
+		if in[i].UpdatePublication != nil {
+			publication := *in[i].UpdatePublication
+			publication.Tags = append([]string(nil), publication.Tags...)
+			out[i].UpdatePublication = &publication
+		}
 	}
 	return out
 }
@@ -222,20 +231,20 @@ func (m *Monitor) Poll(ctx context.Context) error {
 		incident := current[key]
 		if previous, ok := old[key]; ok && previous.Status == incident.Status && previous.Reason == incident.Reason {
 			incident.Since = previous.Since
+			if incident.Status == "missing" && previous.SnoozedUntil != "" {
+				until, _ := time.Parse(time.RFC3339Nano, previous.SnoozedUntil)
+				if observedAt.Before(until) {
+					incident.SnoozedUntil = previous.SnoozedUntil
+				} else {
+					m.event(incident, "problem", "Missing service snooze expired; container is still missing", now)
+				}
+			}
 		} else {
 			m.event(incident, "problem", incident.Reason, now)
 		}
 		m.snapshot.Incidents = append(m.snapshot.Incidents, incident)
 		if incident.Status == "missing" {
-			missing := m.known[key]
-			missing.MonitorStatus = "missing"
-			missing.MonitorReason = incident.Reason
-			missing.UpdateAvailable = false
-			missing.ProposedDigest = ""
-			missing.ComposeWorkingDir = ""
-			missing.ComposeConfigFiles = nil
-			missing.ComposeConfigFilesLabel = ""
-			containers = append(containers, missing)
+			containers = append(containers, missingContainer(m.known[key], incident))
 		}
 	}
 	keys = keys[:0]
@@ -256,7 +265,7 @@ func (m *Monitor) Poll(ctx context.Context) error {
 func identity(c groups.Container) string { return project(c) + "/" + c.Service + "/" + c.Name }
 func (m *Monitor) event(i Incident, kind, message, now string) {
 	m.sequence++
-	m.snapshot.Events = append(m.snapshot.Events, Event{ID: fmt.Sprintf("%d", m.sequence), Project: i.Project, Name: i.Name, Kind: kind, Message: message, Time: now})
+	m.snapshot.Events = append(m.snapshot.Events, Event{incidentID: i.ID, ID: fmt.Sprintf("%d", m.sequence), Project: i.Project, Name: i.Name, Kind: kind, Message: message, Time: now})
 	if m.notifier != nil {
 		m.pending = append(m.pending, m.snapshot.Events[len(m.snapshot.Events)-1])
 		if len(m.pending) > 100 {
