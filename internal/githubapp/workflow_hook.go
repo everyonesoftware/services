@@ -114,6 +114,15 @@ func needsJob(job *yaml.Node, id string) bool {
 	}
 	return false
 }
+func hostedPublicationRunner(job *yaml.Node) bool {
+	switch yamlValue(job, "runs-on") {
+	case "ubuntu-latest", "ubuntu-22.04", "ubuntu-24.04":
+		return true
+	default:
+		return false
+	}
+}
+
 func unconditional(step *yaml.Node) bool {
 	return yamlField(step, "if") == nil && yamlField(step, "continue-on-error") == nil
 }
@@ -179,6 +188,42 @@ func versionSource(root, job *yaml.Node, steps *yaml.Node, before int, value str
 	return false
 }
 
+// Recognize only explicit version arguments, preserving their original source.
+// Multiple recognized names are safe only when they bind to the same value;
+// choosing by precedence could silently announce a different application version.
+func publicationBuildVersion(with *yaml.Node) (string, error) {
+	args := yamlValue(with, "build-args")
+	// Support only plain newline-delimited arguments. The action interprets CSV
+	// quoting, so even an unrecognized argument could hide a version binding.
+	// Reject the entire unsupported input rather than guessing or rewriting it.
+	if strings.ContainsAny(args, "\",") {
+		return "", errors.New("Quoted or CSV build arguments are unsupported; use plain newline-delimited arguments or review the hook manually.")
+	}
+	version := ""
+	seen := map[string]bool{}
+	for _, line := range strings.Split(args, "\n") {
+		name, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if name != "APP_VERSION" && name != "VERSION" && name != "BUILD_VERSION" {
+			continue
+		}
+		if seen[name] {
+			return "", errors.New("Duplicate " + name + " build arguments are ambiguous; keep one explicit binding.")
+		}
+		seen[name] = true
+		if !ok || value == "" {
+			return "", errors.New("Set an explicit numeric version source for the " + name + " build argument.")
+		}
+		if version != "" && !sameBinding(version, value) {
+			return "", errors.New("Conflicting APP_VERSION, VERSION or BUILD_VERSION build arguments are ambiguous; bind recognized version arguments to the same source.")
+		}
+		version = value
+	}
+	if version == "" {
+		return "", errors.New("Automatic Services hook setup needs an explicit APP_VERSION, VERSION or BUILD_VERSION build argument bound to the existing numeric version source; otherwise review the hook manually.")
+	}
+	return version, nil
+}
+
 // Recognize a closed, structurally linked capture -> artifact -> send chain.
 // Arbitrary YAML/expressions are deliberately unsupported, not approximated by
 // substring checks that might approve a different producer or retained file.
@@ -241,8 +286,8 @@ func validateNotificationHook(text string) error {
 				return fail("Custom publication execution is unsupported.")
 			}
 		}
-		if yamlValue(job, "runs-on") != "ubuntu-latest" {
-			return fail("Only ubuntu-latest publication execution is supported.")
+		if !hostedPublicationRunner(job) {
+			return fail("Only hosted ubuntu-latest, ubuntu-22.04 or ubuntu-24.04 publication execution is supported.")
 		}
 	}
 	if yamlField(root, "defaults") != nil || !unconditional(push) || yamlValue(yamlField(push, "with"), "push") != "true" || yamlField(push, "env") != nil {
@@ -290,14 +335,9 @@ func validateNotificationHook(text string) error {
 			return fail("The actual tag metadata producer is missing or conditional.")
 		}
 	}
-	version := ""
-	for _, line := range strings.Split(yamlValue(with, "build-args"), "\n") {
-		if strings.HasPrefix(line, "APP_VERSION=") {
-			if version != "" {
-				return fail("APP_VERSION is duplicated.")
-			}
-			version = strings.TrimPrefix(line, "APP_VERSION=")
-		}
+	version, err := publicationBuildVersion(with)
+	if err != nil {
+		return fail(err.Error())
 	}
 	if !sameBinding(yamlValue(env, "APP_VERSION"), version) {
 		return fail("Captured APP_VERSION must equal the actual build argument source.")

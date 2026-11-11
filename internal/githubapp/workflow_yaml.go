@@ -104,6 +104,16 @@ func provisionConventionalWorkflow(text string) (string, error) {
 	fail := func(reason string) (string, error) {
 		return "", errors.New(reason + " Review the publication workflow manually.")
 	}
+	// Normalize only uniformly CRLF-delimited input for line-based insertion;
+	// restore its original convention after adding the generated blocks.
+	crlf := strings.Contains(text, "\r\n")
+	if crlf {
+		normalized := strings.ReplaceAll(text, "\r\n", "")
+		if strings.ContainsAny(normalized, "\r\n") {
+			return fail("Mixed YAML line endings require manual review.")
+		}
+		text = strings.ReplaceAll(text, "\r\n", "\n")
+	}
 	root, err := workflowYAML(text)
 	if err != nil {
 		return "", err
@@ -147,8 +157,8 @@ func provisionConventionalWorkflow(text string) (string, error) {
 			return fail("Custom job execution or matrix publication is unsupported.")
 		}
 	}
-	if yamlValue(job, "runs-on") != "ubuntu-latest" {
-		return fail("Only conventional ubuntu-latest publication jobs are supported.")
+	if !hostedPublicationRunner(job) {
+		return fail("Only conventional hosted ubuntu-latest, ubuntu-22.04 or ubuntu-24.04 publication jobs are supported.")
 	}
 	if yamlField(push, "if") != nil || yamlField(push, "continue-on-error") != nil || yamlValue(yamlField(push, "with"), "push") != "true" {
 		return fail("Conditional or non-pushing Docker steps are ambiguous.")
@@ -230,17 +240,12 @@ func provisionConventionalWorkflow(text string) (string, error) {
 	if !ghcr {
 		return fail("Only a single unambiguous GHCR image is supported.")
 	}
-	version := ""
-	for _, line := range strings.Split(yamlValue(with, "build-args"), "\n") {
-		if strings.HasPrefix(line, "APP_VERSION=") {
-			if version != "" {
-				return fail("APP_VERSION is duplicated.")
-			}
-			version = strings.TrimPrefix(line, "APP_VERSION=")
-		}
+	version, err := publicationBuildVersion(with)
+	if err != nil {
+		return fail(err.Error())
 	}
-	if !regexp.MustCompile(`^([1-9][0-9]*|\$\{\{\s*(github\.run_number|needs\.[A-Za-z_][A-Za-z0-9_]*\.outputs\.[A-Za-z_][A-Za-z0-9_]*|steps\.[A-Za-z_][A-Za-z0-9_]*\.outputs\.[A-Za-z_][A-Za-z0-9_]*|env\.[A-Za-z_][A-Za-z0-9_]*)\s*\}\})$`).MatchString(version) {
-		return fail("A numeric APP_VERSION build argument with an existing single source of truth is required.")
+	if !versionSource(root, job, steps, pushIndex, version, 0) {
+		return fail("The APP_VERSION, VERSION or BUILD_VERSION build argument must bind to an existing unconditional numeric version source.")
 	}
 	// Our source-preserving insertions require block nodes with conventional indent.
 	if regexp.MustCompile(`^[1-9][0-9]*$`).MatchString(version) {
@@ -323,6 +328,9 @@ func provisionConventionalWorkflow(text string) (string, error) {
 	out.WriteString(insertions[len(lines)])
 	out.WriteString(strings.ReplaceAll(fmt.Sprintf(notifyTemplate, jobID, jobID, jobID), "REPLACE_JOB", jobID))
 	result := out.String()
+	if crlf {
+		result = strings.ReplaceAll(result, "\n", "\r\n")
+	}
 	if err := validateNotificationHook(result); err != nil {
 		return fail("Generated workflow could not be validated: " + err.Error())
 	}

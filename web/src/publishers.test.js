@@ -455,6 +455,16 @@ test('GitHub registration explicitly chooses personal or organization ownership'
   assert.match(organization, /private App must be registered to that organization/)
 })
 
+test('unsupported workflow review deduplicates reasons and distinguishes adaptation from a broken build', () => {
+  const reason = 'No recognized numeric version build argument was found.'
+  const plan = { supported: false, problems: [reason], repository, imageRepository: 'ghcr.io/acme/custom', variables: {}, secretName: 'SERVICES_PUBLISH_TOKEN', workflow: { supported: false, problems: [reason], files: [] } }
+  const html = renderToStaticMarkup(createElement(ui.PublisherReview, { plan }))
+  assert.equal(html.split(reason).length - 1, 1)
+  assert.match(html, /Services cannot automatically adapt this workflow/)
+  assert.match(html, /does not mean your publishing workflow is broken/)
+  assert.doesNotMatch(html, /Merge the setup PR|Add or repair the required workflow/)
+})
+
 test('review shows exact configuration and unmet requirements without claiming workflow editing', () => {
   assert.equal(typeof ui.PublisherReview, 'function')
   const plan = { supported: false, problems: ['Existing notification workflow is missing'], repository, imageRepository: 'ghcr.io/acme/custom', variables: { SERVICES_PUBLISH_URL: 'https://private.test/api/images/published', TAILSCALE_CLIENT_ID: 'registered-client' }, secretName: 'SERVICES_PUBLISH_TOKEN' }

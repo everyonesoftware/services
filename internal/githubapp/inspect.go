@@ -59,7 +59,10 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 		if snapshot.plan.Supported && len(snapshot.plan.Files) == 0 {
 			return Inspection{Supported: true, Problems: []string{}}, nil
 		}
-		return Inspection{Problems: append(snapshot.plan.Problems, "Merge the reviewed workflow setup pull request before applying the publisher connection.")}, nil
+		if snapshot.plan.Supported {
+			return Inspection{Problems: []string{"Open and review the proposed workflow setup pull request. Merge it, then review setup again before applying the publisher connection."}}, nil
+		}
+		return Inspection{Problems: snapshot.plan.Problems}, nil
 	}
 	workflow := files[".github/workflows/verify-and-publish.yml"]
 	if workflow != "" {
