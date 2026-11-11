@@ -10,6 +10,25 @@ const api = await server.ssrLoadModule('/src/publisherApi.ts').catch(() => ({}))
 const ui = await server.ssrLoadModule('/src/Publishers.tsx').catch(() => ({}))
 const repository = { id: 14, fullName: 'Acme/Website', defaultBranch: 'main', installationId: 8 }
 
+test('repository access guidance explains installation and safely links the registered app', async () => {
+  assert.equal(typeof ui.GitHubRepositoryAccess, 'function')
+  const github = { connected: true, permissionsChecked: true, variablesWrite: true, installUrl: 'https://github.com/apps/services/installations/new' }
+  const render = (change = {}, busy = false) => renderToStaticMarkup(createElement(ui.GitHubRepositoryAccess, { github: { ...github, ...change }, busy }))
+  const html = render()
+  for (const text of ['not from your repository list', 'Only select repositories', 'Install', 'Configure', 'Save', 'Refresh repositories', 'organization owner']) assert.ok(html.includes(text), text)
+  assert.match(html, /href="https:\/\/github.com\/apps\/services\/installations\/new"/)
+  assert.match(html, /target="_blank" rel="noreferrer"/)
+  for (const change of [{ installUrl: undefined }, { installUrl: 'https://evil.test/apps/services/installations/new' }]) {
+    assert.doesNotMatch(render(change), /href=/)
+    assert.match(render(change), /Back.*Connections.*Install on selected repositories/)
+  }
+  assert.doesNotMatch(render({}, true), /href=/)
+  assert.doesNotMatch(render({ variablesWrite: false }), /href=/)
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('./Publishers.tsx', import.meta.url), 'utf8')
+  assert.match(source, /step === 1 &&[\s\S]*?<GitHubRepositoryAccess github=\{status\.github\} busy=\{busy\}/)
+})
+
 test('GitHub permission rechecks invalidate stale readiness and review before a failed request', async () => {
   assert.equal(typeof api.checkGitHubPermissionsAndRefresh, 'function')
   const current = { available: true, github: { connected: true, permissionsChecked: true, variablesWrite: true, settingsUrl: 'https://github.com/settings/apps/services/permissions' }, tailnet: { clientId: 'client', audience: 'audience', tags: 'tag:runner' }, connections: [] }
