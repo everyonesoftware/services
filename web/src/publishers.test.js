@@ -490,7 +490,7 @@ test('server connection states never invent a publication or infer verification 
 test('verified connections render only actual publication metadata and a repository-bound run link', () => {
   const publication = { version: '<release>', digest: 'sha256:' + 'a'.repeat(64), tags: ['latest', 'release'], commit: 'abc123', runUrl: 'https://github.com/Acme/Website/actions/runs/42', publishedAt: '2026-01-01T00:00:00Z', receivedAt: '2026-01-01T00:01:00Z', result: 'accepted' }
   const connection = { id: 'saved', state: 'verified', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: publication.publishedAt, lastPublication: publication }
-  const render = next => renderToStaticMarkup(createElement(ui.PublisherConnection, { connection: next, busy: false, onTest() {} }))
+  const render = next => renderToStaticMarkup(createElement(ui.PublisherConnection, { connection: next, busy: false, onTest() {}, view: 'publication' }))
   const html = render(connection)
   for (const text of ['Latest publication', '&lt;release&gt;', publication.digest, 'latest', 'release', 'abc123', 'accepted', 'Published', 'Received']) assert.ok(html.includes(text), text)
   assert.match(html, /href="https:\/\/github.com\/Acme\/Website\/actions\/runs\/42"/)
@@ -591,7 +591,7 @@ test('connection buttons invoke only their explicit target action, without dispa
   const tree = ui.PublisherConnection(props)
   assert.deepEqual(calls, [])
   const buttons = elements(tree).filter(node => node.type === 'button')
-  assert.deepEqual(buttons.map(node => node.props.children), ['Test push again', 'Rotate key', 'Disconnect'])
+  assert.deepEqual(buttons.map(node => node.props.children), ['Test push', 'Rotate key', 'Disconnect'])
   for (const button of buttons) button.props.onClick()
   assert.deepEqual(calls, [['test', 'saved/key'], ['rotate', 'saved/key'], ['disconnect', 'saved/key']])
   const recovery = elements(ui.PublisherConnection({ ...props, connection: { ...connection, state: 'error' } })).find(node => node.type === 'button' && node.props.children === 'Repair & retry push')

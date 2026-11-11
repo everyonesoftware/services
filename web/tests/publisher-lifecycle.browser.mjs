@@ -39,11 +39,17 @@ await page.route('**/api/**', async route => {
 })
 const card = id => page.getByRole('article', { name: `Publisher Demo/Publisher-${id}`, exact: true })
 const dialog = () => page.getByRole('dialog')
-const order = async () => page.locator('.publisher-connections article h2').allTextContents()
+const order = async () => page.locator('.publisher-connections .publisher-row-summary strong').allTextContents()
+const expandConnection = async id => {
+  const summary = card(id).locator('.publisher-row-summary')
+  if (await summary.getAttribute('aria-expanded') !== 'true') await summary.click()
+  await card(id).getByRole('tab', { name: 'Connection', exact: true }).click()
+}
 try {
   await page.goto(`${server.resolvedUrls.local[0]}#publishers`)
   await card('1').waitFor()
   assert.deepEqual(await order(), ['Demo/Publisher-2', 'Demo/Publisher-4', 'Demo/Publisher-1', 'Demo/Publisher-3'])
+  await expandConnection('1')
   await card('1').getByRole('button', { name: 'Reconnect', exact: true }).click()
   await dialog().getByRole('heading', { name: 'Reconnect Demo/Publisher-1?' }).waitFor()
   assert.equal(await dialog().getByRole('button', { name: 'Cancel', exact: true }).evaluate(el => el === document.activeElement), true)
@@ -53,7 +59,7 @@ try {
   await card('1').getByRole('button', { name: 'Reconnect', exact: true }).click()
   await dialog().getByRole('button', { name: 'Reconnect & test push', exact: true }).click()
   await dialog().getByRole('alert').getByText('Fixture conflicting repository settings', { exact: true }).waitFor()
-  assert.equal(await card('1').getByText('Disconnected', { exact: true }).count(), 1)
+  assert.equal(await card('1').locator('.publisher-row-summary').getByText('Disconnected', { exact: true }).count(), 1)
   await dialog().getByRole('button', { name: 'Cancel', exact: true }).click()
   failReconnect = false
   await card('1').getByRole('button', { name: 'Reconnect', exact: true }).click()
@@ -61,6 +67,7 @@ try {
   await dialog().waitFor({ state: 'detached' })
   await card('1').getByText('Waiting for authenticated callback', { exact: true }).first().waitFor()
   assert.deepEqual(await order(), ['Demo/Publisher-1', 'Demo/Publisher-2', 'Demo/Publisher-4', 'Demo/Publisher-3'])
+  await expandConnection('3')
   await card('3').getByRole('button', { name: 'Remove', exact: true }).click()
   await dialog().getByRole('button', { name: 'Cancel', exact: true }).click()
   assert.equal(calls.includes('remove'), false)

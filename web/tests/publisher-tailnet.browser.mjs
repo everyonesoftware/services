@@ -115,7 +115,7 @@ const fillCredential = async () => {
 }
 try {
   await page.goto(`${server.resolvedUrls.local[0]}#publishers`)
-  await button('Connect GitHub repository →').click()
+  await button('Connect repository').click()
   await page.getByRole('heading', { name: 'Connect your GitHub App' }).waitFor()
   await checkIndependentScroll(0)
   assert.equal(await page.getByLabel('Client ID', { exact: true }).count(), 0)
@@ -213,10 +213,10 @@ try {
   assert.equal(await page.getByLabel('Client ID', { exact: true }).inputValue(), 'finance-client', 'refresh preserves explicitly entered draft, not a different repository saved value')
   const savesBeforeCancel = calls.filter(c => c.path === '/api/publishers/tailnet').length
   await button('Cancel setup').click()
-  await page.getByRole('heading', { name: /^Repository connections/ }).waitFor()
+  await page.getByRole('heading', { name: 'Publishers', exact: true }).waitFor()
   assert.equal(calls.filter(c => c.path === '/api/publishers/tailnet').length, savesBeforeCancel)
   // Re-entering the saved repository restores only its own credential.
-  await button('Connect GitHub repository →').click()
+  await button('Connect repository').click()
   await enterRepository('Demo/Finance')
   await page.getByText('repo:Demo@42/Finance@14:ref:refs/heads/main', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('Client ID', { exact: true }).inputValue(), 'finance-client')
