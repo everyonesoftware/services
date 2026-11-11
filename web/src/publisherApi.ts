@@ -47,6 +47,9 @@ function matchesPlan(plan: PublisherPlan, repository: Repository | null, imageRe
     && plan.repository.installationId === repository.installationId && plan.repository.defaultBranch === repository.defaultBranch)
 }
 export function awaitingCallback(connections: Connection[]) { return connections.some(connection => connection.state === 'awaiting_callback') }
+export function orderPublisherConnections(connections: Connection[]) {
+  return [...connections.filter(connection => connection.state !== 'disconnected'), ...connections.filter(connection => connection.state === 'disconnected')]
+}
 export function canOpenWorkflowPlan(plan: PublisherPlan | null, repository: Repository | null, imageRepository: string) {
   return !!(plan?.workflow?.supported && !plan.workflow.problems.length && plan.workflow.fingerprint && plan.workflow.files.length && matchesPlan(plan, repository, imageRepository))
 }
@@ -131,6 +134,8 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
     test: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/test`, 'POST', {}),
     workflow: (repository: Repository, imageRepository: string, fingerprint: string) => request<{ prUrl: string }>('/workflow', 'POST', { repository, imageRepository, fingerprint }),
     disconnect: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/disconnect`, 'POST', {}),
+    reconnect: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/reconnect`, 'POST', {}),
+    remove: (id: string) => request<{ removed: boolean }>(`/${encodeURIComponent(id)}`, 'DELETE', {}),
     rotate: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/rotate`, 'POST', {}),
     recover: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/recover`, 'POST', {}),
   }

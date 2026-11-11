@@ -81,6 +81,8 @@ func (s *Server) registerPublisherRoutes() {
 	s.mux.HandleFunc("POST /api/publishers/{id}/test", s.publisherTest)
 	s.mux.HandleFunc("POST /api/publishers/{id}/recover", s.publisherRecover)
 	s.mux.HandleFunc("POST /api/publishers/{id}/rotate", s.publisherRotate)
+	s.mux.HandleFunc("POST /api/publishers/{id}/reconnect", s.publisherReconnect)
+	s.mux.HandleFunc("DELETE /api/publishers/{id}", s.publisherRemove)
 	s.mux.HandleFunc("POST /api/publishers/{id}/disconnect", s.publisherDisconnect)
 	s.mux.HandleFunc("POST /api/publishers/callback", s.publisherCallback)
 	s.mux.HandleFunc("GET /github-app-callback", s.publisherLanding)

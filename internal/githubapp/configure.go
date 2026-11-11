@@ -102,21 +102,29 @@ func (o *operation) secretExists(base, token string) (bool, error) {
 // not a conditional create: concurrent outside writers cannot be made atomic.
 // A failed or uncertain write must be recovered explicitly, not blindly retried.
 func (c *Client) Configure(ctx context.Context, app App, repository Repository, secret string, variables map[string]string) error {
-	return c.configure(ctx, app, repository, secret, variables, false)
+	return c.configure(ctx, app, repository, secret, variables, false, false)
 }
 
 // RecoverConfiguration leaves an existing secret untouched and reconciles only
 // identical or missing variables. Metadata cannot prove the stored key; callers
 // must require the authenticated connection callback before enabling delivery.
 func (c *Client) RecoverConfiguration(ctx context.Context, app App, repository Repository, secret string, variables map[string]string) error {
-	return c.configure(ctx, app, repository, secret, variables, true)
+	return c.configure(ctx, app, repository, secret, variables, true, false)
+}
+
+// ReconnectConfiguration explicitly replaces an integration's revoked secret,
+// but only after preflighting every variable. Differing variables are not owned
+// by this operation and are never overwritten. Callers persist a fresh key first
+// and reuse it after uncertain writes; only its callback can enable delivery.
+func (c *Client) ReconnectConfiguration(ctx context.Context, app App, repository Repository, secret string, variables map[string]string) error {
+	return c.configure(ctx, app, repository, secret, variables, true, true)
 }
 
 func validPublisherSecret(secret string) bool {
 	return len(secret) >= 32 && len(secret) <= 48<<10 && strings.IndexFunc(secret, func(r rune) bool { return r < 33 || r > 126 }) < 0
 }
 
-func (c *Client) configure(ctx context.Context, app App, repository Repository, secret string, variables map[string]string, recover bool) error {
+func (c *Client) configure(ctx context.Context, app App, repository Repository, secret string, variables map[string]string, recover, replace bool) error {
 	if !validPublisherSecret(secret) {
 		return errors.New("invalid publisher secret")
 	}
@@ -158,7 +166,7 @@ func (c *Client) configure(ctx context.Context, app App, repository Repository, 
 			missing = append(missing, name)
 		}
 	}
-	if !exists {
+	if replace || !exists {
 		encrypted, err := o.encryptPublisherSecret(base, token, secret)
 		if err != nil {
 			return err
@@ -172,7 +180,7 @@ func (c *Client) configure(ctx context.Context, app App, repository Repository, 
 		if exists && !recover {
 			return ErrConflict
 		}
-		if !exists {
+		if replace || !exists {
 			if err = o.writePublisherSecret(base, token, encrypted); err != nil {
 				return err
 			}

@@ -474,7 +474,7 @@ test('verified connections render only actual publication metadata and a reposit
   for (const state of ['configured', 'awaiting_callback', 'error', 'disconnected']) assert.doesNotMatch(render({ ...connection, state }), /Latest publication|Receiving publications/)
 })
 
-test('connection management exposes recovery only for errors and no actions for disconnected connections', () => {
+test('connection management exposes recovery for errors and reconnect/remove for disconnected connections', () => {
   const connection = { id: 'saved', state: 'error', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '2026-01-01T00:00:00Z' }
   const props = { busy: false, onTest() {}, onRecover() {}, onManage() {} }
   const error = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection }))
@@ -485,10 +485,12 @@ test('connection management exposes recovery only for errors and no actions for 
   assert.match(verified, />Rotate key</)
   assert.doesNotMatch(verified, /Repair &amp; retry/)
   const disconnected = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection: { ...connection, state: 'disconnected' } }))
-  assert.doesNotMatch(disconnected, /<button/)
+  assert.match(disconnected, />Reconnect</)
+  assert.match(disconnected, />Remove</)
+  assert.doesNotMatch(disconnected, />Disconnect<|>Rotate key<|Retry push test/)
 })
 
-test('disconnected publisher with pending remote disable exposes only a targeted cleanup retry', () => {
+test('disconnected publisher with pending remote disable retains a targeted cleanup retry', () => {
   const calls = []
   const connection = { id: 'saved', state: 'disconnected', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '', remoteDisablePending: true, error: 'GitHub disable could not be verified' }
   const props = { connection, busy: false, onTest: () => calls.push('test'), onManage: (target, action) => calls.push([target.id, action]) }
@@ -496,9 +498,48 @@ test('disconnected publisher with pending remote disable exposes only a targeted
   assert.match(html, /Retry GitHub cleanup/)
   assert.doesNotMatch(html, /Rotate key|Retry push test/)
   const elements = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(elements) : [node, ...elements(node.props?.children)]
-  const button = elements(ui.PublisherConnection(props)).find(node => node.type === 'button')
+  const button = elements(ui.PublisherConnection(props)).find(node => node.type === 'button' && node.props.children === 'Retry GitHub cleanup')
   button.props.onClick()
   assert.deepEqual(calls, [['saved', 'disconnect']])
+})
+
+test('disconnected buttons target their own connection and respect busy state', () => {
+  const calls = []
+  const connection = { id: 'old/key', state: 'disconnected', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '' }
+  const elements = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(elements) : [node, ...elements(node.props?.children)]
+  const props = { connection, busy: false, onTest() {}, onManage: (target, action) => calls.push([target.id, action]) }
+  const buttons = elements(ui.PublisherConnection(props)).filter(node => node.type === 'button')
+  assert.deepEqual(buttons.map(node => node.props.children), ['Reconnect', 'Remove'])
+  assert.deepEqual(calls, [])
+  buttons.forEach(button => button.props.onClick())
+  assert.deepEqual(calls, [['old/key', 'reconnect'], ['old/key', 'remove']])
+  assert.ok(elements(ui.PublisherConnection({ ...props, busy: true })).filter(node => node.type === 'button').every(node => node.props.disabled))
+})
+
+test('publisher ordering stably places all disconnected entries last without mutating saved state', () => {
+  const connections = ['disconnected', 'verified', 'error', 'disconnected', 'awaiting_callback', 'configured'].map((state, id) => ({ id, state }))
+  assert.equal(typeof api.orderPublisherConnections, 'function')
+  assert.deepEqual(api.orderPublisherConnections(connections).map(item => item.id), [1, 2, 4, 5, 0, 3])
+  assert.deepEqual(connections.map(item => item.id), [0, 1, 2, 3, 4, 5])
+})
+
+test('reconnect and remove API calls use encoded targets and explicit mutation methods', async () => {
+  const calls = []
+  const client = api.createPublisherApi(async (url, options) => { calls.push([url, options.method, options.body]); return Response.json({ removed: true }) })
+  await client.reconnect('old/key')
+  await client.remove('old/key')
+  assert.deepEqual(calls, [['/api/publishers/old%2Fkey/reconnect', 'POST', '{}'], ['/api/publishers/old%2Fkey', 'DELETE', '{}']])
+})
+
+test('reconnect and remove confirmations explain new credentials and local-only removal', () => {
+  const connection = { id: 'saved', state: 'disconnected', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '' }
+  for (const [action, label] of [['reconnect', 'Reconnect &amp; test push'], ['remove', 'Remove publisher']]) {
+    const html = renderToStaticMarkup(createElement(ui.PublisherConfirmation, { connection, action, busy: false, onCancel() {}, onConfirm() {} }))
+    assert.ok(html.includes(label))
+    assert.ok(html.indexOf('>Cancel<') < html.indexOf(`>${label}<`))
+    if (action === 'reconnect') { assert.match(html, /fresh credential/i); assert.match(html, /authenticated callback/i); assert.match(html, /replace.*GitHub.*secret/i) }
+    else { assert.match(html, /Historical publications.*remain/i); assert.match(html, /GitHub.*Tailscale.*not.*deleted/i); assert.match(html, /cleanup.*pending/i) }
+  }
 })
 
 test('named compact confirmations explain owned resources, callback-safe rotation, and default cancellation', () => {

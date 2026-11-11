@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, RefObject } from 'react'
-import { applyAndRefresh, awaitingCallback, canApplyPlan, canOpenWorkflowPlan, checkGitHubPermissionsAndRefresh, createPublisherApi, githubInstallUrl, githubManifestAction, githubPermissionsUrl, githubPullRequestUrl, githubRunUrl, githubVariablesReady, imageRepositoryProblem, readyForPublisherRepositories, refreshAfterPublisherTimeout } from './publisherApi.ts'
+import { applyAndRefresh, awaitingCallback, canApplyPlan, canOpenWorkflowPlan, checkGitHubPermissionsAndRefresh, createPublisherApi, githubInstallUrl, githubManifestAction, githubPermissionsUrl, githubPullRequestUrl, githubRunUrl, githubVariablesReady, imageRepositoryProblem, orderPublisherConnections, readyForPublisherRepositories, refreshAfterPublisherTimeout } from './publisherApi.ts'
 import type { Connection, GitHubStart, PublisherPlan, PublisherStatus, Repository, Tailnet, TailnetGuidance } from './publisherApi.ts'
 import type { AuthUser } from './authApi.ts'
 import './Publishers.css'
@@ -94,7 +94,7 @@ export function PublisherWorkflowPending({ plan, prUrl }: { plan: PublisherPlan;
   return <><h2>Waiting for workflow approval</h2><p>{plan.repository.fullName} · <code>{plan.imageRepository}</code></p><div className="publisher-info publisher-warning"><strong>Merge the setup PR</strong>Review and merge the proposed changes on GitHub. Services does not bypass repository rules or check merge status in the background. Then select Review again to inspect the current workflow before applying configuration.</div>{githubPullRequestUrl(prUrl, plan.repository) ? <a className="button secondary publisher-pr-link" href={prUrl} target="_blank" rel="noreferrer">Review setup pull request ↗</a> : <p className="notice danger" role="alert">The setup PR link could not be verified. No external link was opened.</p>}</>
 }
 
-type ManagementAction = 'disconnect' | 'rotate'
+type ManagementAction = 'disconnect' | 'rotate' | 'reconnect' | 'remove'
 type ConnectionProps = { connection: Connection; busy: boolean; onTest: (id: string) => void; onRecover?: (id: string) => void; onManage?: (connection: Connection, action: ManagementAction) => void }
 export function PublisherConnection({ connection, busy, onTest, onRecover, onManage }: ConnectionProps) {
   const labels: Record<Connection['state'], string> = { configured: 'Configured', awaiting_callback: 'Waiting for authenticated callback', verified: 'Connectivity verified', error: 'Connection needs attention', disconnected: 'Disconnected' }
@@ -106,7 +106,7 @@ export function PublisherConnection({ connection, busy, onTest, onRecover, onMan
     {connection.state === 'error' && <p className="publisher-muted">Check the workflow run in GitHub, the federation’s repository/ref trust, and the runner tag’s access to this server’s HTTPS endpoint. Repair reuses the saved setup; no duplicate key is created.</p>}
     <dl className="publisher-facts"><div><dt>Default branch</dt><dd><code>{connection.repository.defaultBranch}</code></dd></div><div><dt>Created</dt><dd>{dateLabel(connection.createdAt)}</dd></div>{connection.verifiedAt && <div><dt>Connectivity verified</dt><dd>{dateLabel(connection.verifiedAt)}</dd></div>}</dl>
     {connection.state !== 'disconnected' && <div className="publisher-connection-actions">{connection.state !== 'awaiting_callback' && <button className="button secondary" disabled={busy} onClick={() => connection.state === 'error' && onRecover ? onRecover(connection.id) : onTest(connection.id)}>{connection.state === 'error' && onRecover ? 'Repair & retry push' : connection.state === 'verified' ? 'Test push again' : 'Retry push test'}</button>}{onManage && <>{connection.state !== 'awaiting_callback' && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'rotate')}>Rotate key</button>}<button className="button secondary publisher-danger" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Disconnect</button></>}</div>}
-    {connection.state === 'disconnected' && connection.remoteDisablePending && onManage && <div className="publisher-connection-actions"><button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Retry GitHub cleanup</button></div>}
+    {connection.state === 'disconnected' && onManage && <div className="publisher-connection-actions"><button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'reconnect')}>Reconnect</button><button className="button secondary publisher-danger" disabled={busy} onClick={() => onManage(connection, 'remove')}>Remove</button>{connection.remoteDisablePending && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Retry GitHub cleanup</button>}</div>}
   </article>
 }
 
@@ -119,7 +119,11 @@ export function PublisherConfirmation({ connection, action, busy, error, onCance
     return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus() }
   }, [])
   const disconnect = action === 'disconnect'
-  return <dialog className="publisher-confirmation" ref={dialog} aria-labelledby="publisher-confirmation-title" aria-describedby="publisher-confirmation-description" onCancel={event => { event.preventDefault(); if (!busy) onCancel() }}><div className="publisher-confirmation-body"><p className="eyebrow">PUBLISHER CONNECTION</p><h2 id="publisher-confirmation-title">{disconnect ? 'Disconnect' : 'Rotate key for'} {connection.repository.fullName}?</h2><p><code>{connection.imageRepository}</code></p><div id="publisher-confirmation-description">{disconnect ? <><p>Revoke this publisher’s local key and disable its owned notification configuration. Historical publications remain available.</p><p>Shared Tailscale access and federation are not deleted. Shared or changed GitHub resources are not removed.</p></> : <><p>Create a replacement key, update the repository secret, and dispatch a new push test. The old key stays active until Services receives the authenticated callback.</p><p>An accepted dispatch is not success. Keep the saved connection while verification completes.</p></>}</div>{error && <p className="notice danger" role="alert">{error}</p>}</div><footer className="publisher-footer"><button className="button secondary" ref={cancel} disabled={busy} onClick={onCancel}>Cancel</button><button className={`button primary ${disconnect ? 'publisher-danger' : ''}`} disabled={busy} onClick={onConfirm}>{busy ? 'Please wait…' : disconnect ? 'Disconnect publisher' : 'Rotate & test push'}</button></footer></dialog>
+  const destructive = disconnect || action === 'remove'
+  const title = { disconnect: 'Disconnect', rotate: 'Rotate key for', reconnect: 'Reconnect', remove: 'Remove' }[action]
+  const label = { disconnect: 'Disconnect publisher', rotate: 'Rotate & test push', reconnect: 'Reconnect & test push', remove: 'Remove publisher' }[action]
+  const description = action === 'reconnect' ? <><p>Create a fresh credential, replace the GitHub Actions secret for this saved repository, and dispatch a new connectivity test. The revoked credential is never restored.</p><p>Notifications are enabled only after an authenticated callback verifies the new connection. Conflicting repository settings stop reconnection.</p></> : action === 'remove' ? <><p>Remove this disconnected connection from Services. Historical publications remain available.</p><p>GitHub resources and shared Tailscale access are not deleted. If GitHub cleanup is pending, retry cleanup before removing this record.</p></> : disconnect ? <><p>Revoke this publisher’s local key and disable its owned notification configuration. Historical publications remain available.</p><p>Shared Tailscale access and federation are not deleted. Shared or changed GitHub resources are not removed.</p></> : <><p>Create a replacement key, update the repository secret, and dispatch a new push test. The old key stays active until Services receives the authenticated callback.</p><p>An accepted dispatch is not success. Keep the saved connection while verification completes.</p></>
+  return <dialog className="publisher-confirmation" ref={dialog} aria-labelledby="publisher-confirmation-title" aria-describedby="publisher-confirmation-description" onCancel={event => { event.preventDefault(); if (!busy) onCancel() }}><div className="publisher-confirmation-body"><p className="eyebrow">PUBLISHER CONNECTION</p><h2 id="publisher-confirmation-title">{title} {connection.repository.fullName}?</h2><p><code>{connection.imageRepository}</code></p><div id="publisher-confirmation-description">{description}</div>{error && <p className="notice danger" role="alert">{error}</p>}</div><footer className="publisher-footer"><button className="button secondary" ref={cancel} disabled={busy} onClick={onCancel}>Cancel</button><button className={`button primary ${destructive ? 'publisher-danger' : ''}`} disabled={busy} onClick={onConfirm}>{busy ? 'Please wait…' : label}</button></footer></dialog>
 }
 
 type FooterProps = { step: number; busy: boolean; available: boolean; canAdvance: boolean; workflowNeeded: boolean; pendingWorkflow: boolean; onBack: () => void; onAdvance: () => void; onCancel: () => void }
@@ -129,7 +133,8 @@ export function PublisherFooter({ step, busy, available, canAdvance, workflowNee
 
 type Props = { user: AuthUser; onBack: () => void; onAccounts: () => void; onLogout: () => void }
 export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
-  const [status, setStatus] = useState<PublisherStatus | null>(null)
+  const [savedStatus, setStatus] = useState<PublisherStatus | null>(null)
+  const status = savedStatus ? { ...savedStatus, connections: orderPublisherConnections(savedStatus.connections) } : null
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const lock = useRef(false)
@@ -234,8 +239,21 @@ export function Publishers({ user, onBack, onAccounts, onLogout }: Props) {
   const manageConnection = (connection: Connection, action: ManagementAction) => { if (!lock.current) { setError(''); setConfirmation({ connection, action }) } }
   const confirmManagement = () => void perform(async () => {
     if (!confirmation) return
-    const result = await api[confirmation.action](confirmation.connection.id)
-    setStatus(current => current ? { ...current, connections: current.connections.map(saved => saved.id === result.connection.id ? result.connection : saved) } : current)
+    try {
+      if (confirmation.action === 'remove') {
+        const result = await api.remove(confirmation.connection.id)
+        if (!result.removed) throw new Error('Removal was not confirmed. Refresh saved state before retrying.')
+        setStatus(current => current ? { ...current, connections: current.connections.filter(saved => saved.id !== confirmation.connection.id) } : current)
+      } else {
+        const result = await api[confirmation.action](confirmation.connection.id)
+        setStatus(current => current ? { ...current, connections: current.connections.map(saved => saved.id === result.connection.id ? result.connection : saved) } : current)
+      }
+    } catch (cause) {
+      // A failed remote operation can still persist local progress. Keep the
+      // confirmation/error visible, but never leave its card showing stale state.
+      try { setStatus(await api.status()) } catch { /* Preserve the original error. */ }
+      throw cause
+    }
     setConfirmation(null)
     setStatus(await api.status())
   })
