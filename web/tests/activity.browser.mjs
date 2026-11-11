@@ -128,6 +128,7 @@ async function exercise(viewport) {
     const newest = await ids()
     assert.deepEqual(newest, ['operation:queued','event:event','operation:running','event:engine','operation:failed','operation:complete','operation:literal-all'])
     assert.equal(await page.getByRole('searchbox', { name: 'Search activity', exact: true }).isVisible(), true)
+    assert.equal(await page.locator('.unified-activity > .page-heading').evaluate(element => getComputedStyle(element).borderBottomWidth), '0px', 'No divider bar between the Activity title and filter panel')
     assert.equal(await page.locator('.activity-filters select,.activity-filter-summary,[data-state-filter]').count(), 0)
     assert.equal(await page.locator('.activity-filters').evaluate(element => element.nextElementSibling.className), 'activity-feed', 'Feed directly follows toolbar without a visible count or scope row')
     const buttons = page.locator('.activity-filters [aria-haspopup=menu]')
