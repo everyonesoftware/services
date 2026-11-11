@@ -19,6 +19,13 @@ test('Tailscale setup explains a repository-specific trust with exact fetched su
   assert.match(html, /href="https:\/\/login.tailscale.com\/admin\/settings\/trust-credentials"/)
   assert.match(html, /href="https:\/\/tailscale.com\/docs\/features\/workload-identity-federation"/)
   assert.doesNotMatch(html, /OAuth secret|Register existing federation/)
+  for (const [fullName, description] of [['everyonesoftware/finance-typescript', 'everyonesoftware_finance-typescript'], ['Acme-Team/Web_site.v2', 'Acme-Team_Web_site.v2']]) {
+    const instructions = renderToStaticMarkup(createElement(ui.PublisherTailscale, { ...props, repository: { ...repository, fullName } }))
+    assert.ok(instructions.includes(`Set the description to <code>${description}</code>`))
+    assert.match(instructions, /Replace the repository’s slash with an underscore/)
+    assert.doesNotMatch(instructions, /Only alphanumeric characters are allowed/)
+    assert.doesNotMatch(instructions, /Name it for/)
+  }
   const unavailable = renderToStaticMarkup(createElement(ui.PublisherTailscale, { ...props, guidance: { ...guidance, subject: '', subjectError: 'Custom claims require manual review' } }))
   assert.match(unavailable, /Custom claims require manual review/)
   assert.doesNotMatch(unavailable, /repo:Acme\/Website:ref/)
