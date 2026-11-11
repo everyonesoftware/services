@@ -22,7 +22,7 @@ type PermissionStatus struct {
 func (c *Client) VerifyRepositoryPermissions(ctx context.Context, app App, repository Repository) error {
 	o, cancel := c.begin(ctx)
 	defer cancel()
-	_, err := o.repositoryToken(app, repository, map[string]string{"metadata": "read", "variables": "write"})
+	_, err := o.repositoryToken(app, repository, map[string]string{"metadata": "read", "actions_variables": "write"})
 	if err != nil {
 		// repositoryToken returns only sanitized local errors. Keep cancellation
 		// distinguishable without exposing the underlying transport's error text.
@@ -64,5 +64,5 @@ func (c *Client) CheckPermissions(ctx context.Context, app App) (PermissionStatu
 	if v.Owner.Type == "Organization" {
 		settingsURL = "https://github.com/organizations/" + v.Owner.Login + "/settings/apps/" + v.Slug + "/permissions"
 	}
-	return PermissionStatus{VariablesWrite: v.Permissions["variables"] == "write", SettingsURL: settingsURL}, nil
+	return PermissionStatus{VariablesWrite: v.Permissions["actions_variables"] == "write", SettingsURL: settingsURL}, nil
 }

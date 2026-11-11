@@ -22,14 +22,14 @@ func TestOperationTokensHaveExplicitLeastPrivilege(t *testing.T) {
 		{"install", map[string]string{"metadata": "read", "contents": "write", "workflows": "write", "pull_requests": "write"}, func(c *Client) {
 			_, _ = c.InstallWorkflow(context.Background(), app, repository, strings.Repeat("a", 64))
 		}},
-		{"configure", map[string]string{"metadata": "read", "secrets": "write", "variables": "write"}, func(c *Client) {
+		{"configure", map[string]string{"metadata": "read", "secrets": "write", "actions_variables": "write"}, func(c *Client) {
 			_ = c.Configure(context.Background(), app, repository, strings.Repeat("s", 32), map[string]string{enabledName: "false"})
 		}},
-		{"recover", map[string]string{"metadata": "read", "secrets": "write", "variables": "write"}, func(c *Client) {
+		{"recover", map[string]string{"metadata": "read", "secrets": "write", "actions_variables": "write"}, func(c *Client) {
 			_ = c.RecoverConfiguration(context.Background(), app, repository, strings.Repeat("s", 32), map[string]string{enabledName: "false"})
 		}},
 		{"rotate", map[string]string{"metadata": "read", "secrets": "write"}, func(c *Client) { _ = c.ReplaceSecret(context.Background(), app, repository, strings.Repeat("s", 32)) }},
-		{"enable", map[string]string{"metadata": "read", "variables": "write"}, func(c *Client) { _ = c.SetEnabled(context.Background(), app, repository, true) }},
+		{"enable", map[string]string{"metadata": "read", "actions_variables": "write"}, func(c *Client) { _ = c.SetEnabled(context.Background(), app, repository, true) }},
 		{"dispatch", map[string]string{"metadata": "read", "actions": "write"}, func(c *Client) {
 			_ = c.DispatchTest(context.Background(), app, repository, "connection", strings.Repeat("a", 16))
 		}},

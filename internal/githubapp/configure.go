@@ -133,7 +133,7 @@ func (c *Client) configure(ctx context.Context, app App, repository Repository, 
 	sort.Strings(names)
 	o, cancel := c.begin(ctx)
 	defer cancel()
-	token, err := o.repositoryToken(app, repository, map[string]string{"metadata": "read", "secrets": "write", "variables": "write"})
+	token, err := o.repositoryToken(app, repository, map[string]string{"metadata": "read", "secrets": "write", "actions_variables": "write"})
 	if err != nil {
 		return err
 	}
@@ -273,7 +273,7 @@ func (o *operation) writePublisherSecret(base, token string, encrypted map[strin
 func (c *Client) SetEnabled(ctx context.Context, app App, repository Repository, enabled bool) error {
 	o, cancel := c.begin(ctx)
 	defer cancel()
-	token, err := o.repositoryToken(app, repository, map[string]string{"metadata": "read", "variables": "write"})
+	token, err := o.repositoryToken(app, repository, map[string]string{"metadata": "read", "actions_variables": "write"})
 	if err != nil {
 		return err
 	}

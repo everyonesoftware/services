@@ -144,7 +144,7 @@ func TestVerifyRepositoryPermissionsUsesFreshScopedTokenAndReadback(t *testing.T
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(input.Permissions, map[string]string{"metadata": "read", "variables": "write"}) || !reflect.DeepEqual(input.RepositoryIDs, []int64{repository.ID}) {
+			if !reflect.DeepEqual(input.Permissions, map[string]string{"metadata": "read", "actions_variables": "write"}) || !reflect.DeepEqual(input.RepositoryIDs, []int64{repository.ID}) {
 				t.Fatalf("wrong scope %+v", input)
 			}
 			return response(201, map[string]any{"token": fmt.Sprintf("scoped-secret-%d", calls), "expires_at": time.Now().Add(time.Hour)}), nil
@@ -190,7 +190,7 @@ func TestPermissionStatusOwnerAndGrantValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			permissions := map[string]string{}
 			if tc.grant != "" {
-				permissions["variables"] = tc.grant
+				permissions["actions_variables"] = tc.grant
 			}
 			c := fakeClient(t, func(*http.Request) (*http.Response, error) {
 				return response(200, map[string]any{"id": app.ID, "slug": app.Slug, "owner": map[string]string{"login": tc.owner, "type": tc.kind}, "permissions": permissions}), nil
@@ -246,7 +246,7 @@ func TestPermissionStatusMissingOwnerIsRejected(t *testing.T) {
 	app, _ := testApp(t)
 	for _, explicitNull := range []bool{false, true} {
 		c := fakeClient(t, func(*http.Request) (*http.Response, error) {
-			payload := map[string]any{"id": app.ID, "slug": app.Slug, "permissions": map[string]string{"variables": "write"}}
+			payload := map[string]any{"id": app.ID, "slug": app.Slug, "permissions": map[string]string{"actions_variables": "write"}}
 			if explicitNull {
 				payload["owner"] = nil
 			}
@@ -315,7 +315,7 @@ func TestPermissionStatusChecksAppWithJWT(t *testing.T) {
 		if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], sig); err != nil {
 			t.Fatal(err)
 		}
-		return response(200, map[string]any{"id": app.ID, "slug": app.Slug, "owner": map[string]string{"login": "alice", "type": "User"}, "permissions": map[string]string{"variables": "write"}}), nil
+		return response(200, map[string]any{"id": app.ID, "slug": app.Slug, "owner": map[string]string{"login": "alice", "type": "User"}, "permissions": map[string]string{"actions_variables": "write"}}), nil
 	})
 	got, err := c.CheckPermissions(context.Background(), app)
 	want := PermissionStatus{VariablesWrite: true, SettingsURL: "https://github.com/settings/apps/services/permissions"}
