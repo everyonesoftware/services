@@ -27,7 +27,12 @@ await page.route('**/api/**', async route => {
   if (path === '/api/auth/status') return route.fulfill({ json: { setupRequired: false } })
   if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 'fixture-admin', username: 'Browser fixture', role: 'admin' } } })
   if (path === '/api/publishers') {
-    assert.equal(req.method(), 'GET', 'test must not create a publisher')
+    if (req.method() === 'POST') {
+      const connection = { id: 'fixture-publisher', state: 'awaiting_callback', repository: body.repository, imageRepository: body.imageRepository, createdAt: '2026-01-01T00:00:00Z' }
+      status.connections = [connection]
+      return route.fulfill({ json: { connection } })
+    }
+    assert.equal(req.method(), 'GET')
     return route.fulfill({ json: status })
   }
   if (path === '/api/publishers/repositories') return route.fulfill({ json: { repositories: repos } })
@@ -54,8 +59,52 @@ await page.route('**/api/**', async route => {
 })
 const button = name => page.getByRole('button', { name, exact: true })
 const primary = () => page.locator('.publisher-footer .primary')
+const checkedScrollSteps = new Set()
+const checkIndependentScroll = async step => {
+  assert.equal(await page.locator('.publisher-step-content').evaluate(el => el.scrollTop), 0, `step ${step}: new step starts at the top`)
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1200, height: 600 }, { width: 390, height: 800 }, { width: 390, height: 600 }]) {
+    await page.setViewportSize(viewport)
+    // Force long content on every real step, without changing provider data.
+    await page.locator('.publisher-step-content').evaluate(el => {
+      const filler = document.createElement('div')
+      filler.id = 'scroll-layout-fixture'
+      filler.style.height = '1600px'
+      el.append(filler)
+      el.scrollTop = 0
+    })
+    const before = await page.evaluate(() => {
+      const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height } }
+      return { steps: box('.publisher-steps'), footer: box('.publisher-footer'), heading: box('.page-heading') }
+    })
+    const content = page.locator('.publisher-step-content')
+    assert.ok(await content.evaluate(el => el.clientHeight > 80 && el.scrollHeight > el.clientHeight), `step ${step}: bounded right panel at ${viewport.width}x${viewport.height}`)
+    await content.hover()
+    await page.mouse.wheel(0, 500)
+    await page.waitForFunction(() => document.querySelector('.publisher-step-content').scrollTop > 0, undefined, { timeout: 3000 })
+    await content.evaluate(el => { el.scrollTop = 0 })
+    await page.getByRole('region', { name: 'Publisher step content', exact: true }).focus()
+    await page.keyboard.press('PageDown')
+    await page.waitForFunction(() => document.querySelector('.publisher-step-content').scrollTop > 0, undefined, { timeout: 3000 })
+    const after = await page.evaluate(() => {
+      const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height } }
+      const outer = document.querySelector('.app-content')
+      const content = document.querySelector('.publisher-step-content')
+      return { steps: box('.publisher-steps'), footer: box('.publisher-footer'), heading: box('.page-heading'), outerScroll: outer.scrollTop, outerOverflow: outer.scrollHeight - outer.clientHeight, documentOverflow: document.documentElement.scrollHeight - innerHeight, horizontalOverflow: document.documentElement.scrollWidth - innerWidth, contentOverflow: content.scrollWidth - content.clientWidth }
+    })
+    assert.deepEqual(after.steps, before.steps, `step ${step}: step navigation must not move`)
+    assert.deepEqual(after.footer, before.footer, `step ${step}: actions must not move`)
+    assert.deepEqual(after.heading, before.heading)
+    assert.equal(after.outerScroll, 0)
+    for (const name of ['outerOverflow', 'documentOverflow', 'horizontalOverflow', 'contentOverflow']) assert.ok(after[name] <= 1, `step ${step}: ${name} = ${after[name]}`)
+    assert.ok(before.footer.y + before.footer.height <= viewport.height, 'actions remain within viewport')
+    await content.evaluate(el => { document.getElementById('scroll-layout-fixture').remove(); el.scrollTop = 0 })
+  }
+  checkedScrollSteps.add(step)
+  await page.setViewportSize({ width: 1200, height: 1000 })
+}
 const enterRepository = async name => {
   await button('Select repository →').click()
+  if (!checkedScrollSteps.has(1)) await checkIndependentScroll(1)
   await page.getByRole('radio', { name: new RegExp(name) }).check()
   await button('Set up Tailscale →').click()
 }
@@ -68,10 +117,12 @@ try {
   await page.goto(`${server.resolvedUrls.local[0]}#publishers`)
   await button('Connect GitHub repository →').click()
   await page.getByRole('heading', { name: 'Connect your GitHub App' }).waitFor()
+  await checkIndependentScroll(0)
   assert.equal(await page.getByLabel('Client ID', { exact: true }).count(), 0)
   await enterRepository('Demo/Finance')
   await page.getByText('repo:Demo@42/Finance@14:ref:refs/heads/main', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('Client ID', { exact: true }).inputValue(), '', 'global Services identity must not prefill Finance')
+  await checkIndependentScroll(2)
   assert.equal(await primary().isDisabled(), true)
   assert.equal(await page.locator('a[href="https://login.tailscale.com/admin/settings/trust-credentials"]').count(), 1)
   const advanced = page.getByText('Advanced identity guidance & troubleshooting', { exact: true })
@@ -135,6 +186,7 @@ try {
   planFailure = false
   await primary().click()
   await page.getByRole('heading', { name: 'Review publisher setup' }).waitFor()
+  await checkIndependentScroll(3)
   const saves = calls.filter(c => c.path === '/api/publishers/tailnet')
   assert.deepEqual(saves.at(-1).body, { repository: repos[0], clientId: 'finance-client', audience: 'api.tailscale.com/finance-client', tags: 'tag:services-publisher' })
   assert.equal(status.tailnet.clientId, 'legacy-services-only')
@@ -168,6 +220,12 @@ try {
   await enterRepository('Demo/Finance')
   await page.getByText('repo:Demo@42/Finance@14:ref:refs/heads/main', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('Client ID', { exact: true }).inputValue(), 'finance-client')
+  await primary().click()
+  await page.getByRole('heading', { name: 'Review publisher setup' }).waitFor()
+  await primary().click()
+  await page.locator('.publisher-steps li[aria-current="step"]').filter({ hasText: 'Verify push' }).waitFor()
+  await checkIndependentScroll(4)
+  assert.deepEqual([...checkedScrollSteps].sort(), [0, 1, 2, 3, 4])
   assert.deepEqual(errors, [])
-  console.log('PASS: actual clipboard and legacy fallback; all copy values; checkmark/reset; clipboard failure/retry and keyboard activation; collapsed guidance; separate GitHub/Repository/Tailscale steps; exact subjects; no global credential reuse; save/plan failures; Back and repository switching; missing/custom identity blocked; repository-bound save and readback; cancellation; saved-state restore; desktop and 390px layout. Browser fixtures only, no live provider writes.')
+  console.log('PASS: independent wheel/keyboard scrolling with fixed step navigation, heading and actions across all five steps at desktop, short desktop, phone and short phone sizes; new-step scroll reset; actual clipboard and legacy fallback; copy success/failure/retry; identity safeguards; repository-bound save/readback; cancellation; saved-state restore. Browser fixtures only, no live provider writes.')
 } finally { await browser.close(); await server.close() }
