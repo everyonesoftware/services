@@ -14,15 +14,64 @@ const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message 
 const dateLabel = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : 'Not available'
 const steps = ['GitHub App', 'Repository', 'Tailscale', 'Review setup', 'Verify push']
 
+function PublisherCopyValue({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; clearTimeout(timer.current) }
+  }, [])
+  const copy = async () => {
+    clearTimeout(timer.current)
+    setCopied(false)
+    setError('')
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value)
+      } else {
+        const focused = document.activeElement
+        const field = document.createElement('textarea')
+        field.value = value
+        field.style.cssText = 'position:fixed;left:-9999px;top:0'
+        document.body.append(field)
+        try {
+          field.select()
+          if (!document.execCommand('copy')) throw new Error('Clipboard unavailable')
+        } finally {
+          field.remove()
+          if (focused instanceof HTMLElement) focused.focus()
+        }
+      }
+      if (!mounted.current) return
+      setCopied(true)
+      timer.current = setTimeout(() => setCopied(false), 2000)
+    } catch {
+      if (mounted.current) setError('Could not copy. Select and copy the text manually.')
+    }
+  }
+  return <><div className="publisher-copy-block"><code>{value}</code><button className="publisher-copy-value" type="button" aria-label={`${copied ? 'Copied' : 'Copy'} ${label}`} title={copied ? 'Copied' : `Copy ${label}`} data-copied={copied} onClick={() => void copy()}><svg viewBox="0 0 24 24" aria-hidden="true">{copied ? <path d="m5 12 4 4L19 6" /> : <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4" /></>}</svg></button></div><span className="sr-only" role="status">{copied ? `${label} copied` : ''}</span>{error && <p className="publisher-copy-error" role="alert">{error}</p>}</>
+}
+
 export function PublisherTailscale({ repository, guidance, tailnet, endpoint, busy, onChange, onReload }: { repository: Repository; guidance: TailnetGuidance | null; tailnet: Tailnet; endpoint: string; busy: boolean; onChange: (value: Tailnet) => void; onReload: () => void }) {
+  const runnerTag = tailnet.tags.trim() || 'tag:services-publisher'
   return <><h2>Set up Tailscale for {repository.fullName}</h2><p>Create a dedicated trust credential for this repository. Do not reuse a credential restricted to another repository.</p>
-    <section className="publisher-info publisher-tailnet-guide" aria-label="Create repository trust credential"><h3>1. Create a federated identity</h3><p>A tailnet administrator must complete these steps. Services cannot create trust credentials or change your network policy.</p><a className="button secondary" href="https://login.tailscale.com/admin/settings/trust-credentials" target="_blank" rel="noreferrer">Open Tailscale trust credentials ↗</a>
-      <ol><li>Select <b>Credential → OpenID Connect</b> (federated identity). Set the description to <code>{repository.fullName.replace('/', '_')}</code>. Replace the repository’s slash with an underscore.</li><li>Select <b>GitHub Actions</b> as the issuer, or choose <b>Custom issuer</b> and paste the issuer URL below. Paste the exact subject below; it is read from GitHub for this repository’s default branch, not guessed from its name.</li><li>Under <b>Keys → Auth Keys → Write</b>, authorize the runner tag, for example <code>tag:services-publisher</code>. Select <b>Generate credential</b>.</li><li>Copy its <b>Client ID</b> and <b>Audience</b> into the fields below. Use the audience shown by Tailscale exactly; do not add <code>https://</code>.</li></ol>
-      {guidance ? <><dl className="publisher-facts"><div><dt>Issuer</dt><dd><code>{guidance.issuer}</code></dd></div><div><dt>Subject · {repository.defaultBranch}</dt><dd>{guidance.subject ? <code>{guidance.subject}</code> : <span role="alert">{guidance.subjectError || 'GitHub subject could not be determined. Review the repository OIDC settings before continuing.'}</span>}</dd></div></dl><p>These values cover default-branch jobs without a GitHub environment. Environment, release-tag, or custom subject contexts need a separately reviewed trust rule; do not broaden the subject to a wildcard.</p></> : <p role="status">Load the repository’s current GitHub identity before creating the credential.</p>}
-      <button className="button secondary" type="button" disabled={busy} onClick={onReload}>Refresh GitHub identity</button><p><a href="https://tailscale.com/docs/features/workload-identity-federation" target="_blank" rel="noreferrer">Workload identity federation instructions ↗</a> · <a href="https://tailscale.com/docs/integrations/github/github-action" target="_blank" rel="noreferrer">GitHub Action setup ↗</a></p>
+    <section className="publisher-info publisher-tailnet-guide publisher-identity-guide" aria-label="Create repository trust credential">
+      <div className="publisher-identity-head"><div><h3>1. Create a federated identity</h3><p>Complete these steps in Tailscale as a tailnet administrator.</p></div><a className="button primary" href="https://login.tailscale.com/admin/settings/trust-credentials" target="_blank" rel="noreferrer">Open Tailscale ↗</a></div>
+      <ol className="publisher-identity-steps">
+        <li><p>Choose <b>Credential → OpenID Connect</b>. Paste this description.</p><PublisherCopyValue key={repository.fullName} label="description" value={repository.fullName.replace('/', '_')} /></li>
+        <li><p>Select <b>GitHub Actions</b> as the issuer. For a custom issuer, paste this URL.</p>{guidance?.issuer ? <PublisherCopyValue key={guidance.issuer} label="issuer URL" value={guidance.issuer} /> : <p role="status">Load the repository’s current GitHub identity before creating the credential.</p>}</li>
+        <li><p>Paste this exact <b>subject</b> for the <b>{repository.defaultBranch}</b> branch.</p>{guidance?.subject ? <PublisherCopyValue key={guidance.subject} label="subject" value={guidance.subject} /> : guidance ? <p role="alert">{guidance.subjectError || 'GitHub subject could not be determined. Review the repository OIDC settings before continuing.'}</p> : <p role="status">Load the repository’s current GitHub identity before creating the credential.</p>}<p className="publisher-muted">Restricted to this repository’s default branch. Do not use a wildcard.</p></li>
+        <li><p>Under <b>Keys → Auth Keys → Write</b>, authorize your runner tag.</p><PublisherCopyValue key={runnerTag} label="runner tag" value={runnerTag} />{!tailnet.tags.trim() && <p className="publisher-muted">Example tag — use the runner tag authorized by your tailnet policy.</p>}</li>
+        <li><p>Select <b>Generate credential</b>, then bring its <b>Client ID</b> and <b>Audience</b> back here.</p></li>
+      </ol>
+      <details className="publisher-identity-details"><summary>Advanced identity guidance &amp; troubleshooting</summary><p>These values cover default-branch jobs without a GitHub environment. Environment, release-tag, or custom subject contexts need a separately reviewed trust rule; do not broaden the subject to a wildcard. Services cannot create trust credentials or change your network policy.</p><p><a href="https://tailscale.com/docs/features/workload-identity-federation" target="_blank" rel="noreferrer">Workload identity federation instructions ↗</a> · <a href="https://tailscale.com/docs/integrations/github/github-action" target="_blank" rel="noreferrer">GitHub Action setup ↗</a></p></details>
+      <button className="button secondary publisher-identity-refresh" type="button" disabled={busy} onClick={onReload}>Refresh GitHub identity</button>
     </section>
     <section className="publisher-info publisher-tailnet-guide"><h3>2. Allow private HTTPS delivery</h3><p>In your tailnet policy, allow only the authorized runner tag to reach this Services server over HTTPS. Credential scopes allow joining the tailnet; they do not grant network access.</p><p>Destination: <code>{endpoint}</code>. Use the HTTPS host and port from this URL in your rule, not the API path.</p><a href="https://login.tailscale.com/admin/acls" target="_blank" rel="noreferrer">Open Tailscale access controls ↗</a></section>
     <h3 className="publisher-tailnet-heading">3. Save this repository’s credential</h3><div className="publisher-tailnet"><label>Client ID<input value={tailnet.clientId} onChange={event => onChange({ ...tailnet, clientId: event.target.value })} required autoComplete="off" spellCheck={false} placeholder="Copy from the new trust credential" /></label><label>Audience<input value={tailnet.audience} onChange={event => onChange({ ...tailnet, audience: event.target.value })} required autoComplete="off" spellCheck={false} placeholder="Copy the exact Tailscale audience" /></label><label>Runner tags<input value={tailnet.tags} onChange={event => onChange({ ...tailnet, tags: event.target.value })} required placeholder="tag:services-publisher" autoComplete="off" spellCheck={false} /></label></div>
+    <p className="publisher-muted">Use the audience exactly as shown by Tailscale. Do not add <code>https://</code>.</p>
     <p className="publisher-muted">Save &amp; review stores these nonsecret values only for {repository.fullName}. Access is not verified until the runner sends an authenticated connection proof.</p><details className="publisher-info"><summary>If the test fails with 403</summary><p>Open the credential linked in the workflow error and inspect its latest token exchange error. Check subject, audience, and custom claim rules first. A subject naming another repository cannot authorize this one.</p></details></>
 }
 

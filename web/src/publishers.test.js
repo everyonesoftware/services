@@ -21,14 +21,21 @@ test('Tailscale setup explains a repository-specific trust with exact fetched su
   assert.doesNotMatch(html, /OAuth secret|Register existing federation/)
   for (const [fullName, description] of [['everyonesoftware/finance-typescript', 'everyonesoftware_finance-typescript'], ['Acme-Team/Web_site.v2', 'Acme-Team_Web_site.v2']]) {
     const instructions = renderToStaticMarkup(createElement(ui.PublisherTailscale, { ...props, repository: { ...repository, fullName } }))
-    assert.ok(instructions.includes(`Set the description to <code>${description}</code>`))
-    assert.match(instructions, /Replace the repository’s slash with an underscore/)
+    assert.match(instructions, /Paste this description/)
+    assert.ok(instructions.includes(`<code>${description}</code>`))
+    assert.match(instructions, /aria-label="Copy description"/)
     assert.doesNotMatch(instructions, /Only alphanumeric characters are allowed/)
     assert.doesNotMatch(instructions, /Name it for/)
   }
   const unavailable = renderToStaticMarkup(createElement(ui.PublisherTailscale, { ...props, guidance: { ...guidance, subject: '', subjectError: 'Custom claims require manual review' } }))
   assert.match(unavailable, /Custom claims require manual review/)
   assert.doesNotMatch(unavailable, /repo:Acme\/Website:ref/)
+  assert.doesNotMatch(unavailable, /aria-label="Copy subject"/)
+  assert.match(html, /<details[^>]*>[\s\S]*Advanced identity guidance/)
+  for (const label of ['description', 'issuer URL', 'subject', 'runner tag']) assert.ok(html.includes(`aria-label="Copy ${label}"`))
+  assert.equal((html.match(/class="publisher-copy-value"/g) || []).length, 4)
+  const customTag = renderToStaticMarkup(createElement(ui.PublisherTailscale, { ...props, tailnet: { ...props.tailnet, tags: 'tag:custom-runner' } }))
+  assert.match(customTag, /<code>tag:custom-runner<\/code>/)
 })
 
 test('Tailscale requests bind identity discovery and credential saving to the exact selected repository', async () => {
