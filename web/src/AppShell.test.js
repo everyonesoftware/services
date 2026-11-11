@@ -19,6 +19,7 @@ for (const [component, active] of [[App, 'monitor'], [Publishers, 'publishers'],
     assert.ok(sidebar, 'shared sidebar must exist')
     assert.match(sidebar, /aria-label="Services home"/)
     assert.match(sidebar, /class="brand-mark"/)
+    assert.doesNotMatch(sidebar, />\s*Workspace\s*</)
     const links = [...sidebar.matchAll(/<a [^>]*href="#(monitor|publishers|accounts)"[^>]*>/g)]
       .filter(match => !match[0].includes('class="brand"'))
     assert.deepEqual(links.map(match => match[1]), ['monitor', 'publishers', 'accounts'])

@@ -3,8 +3,7 @@
 .app-sidebar .brand { padding: 0 12px; gap: 10px; color: #f1f5ef; font-size: 24px; font-weight: 650; letter-spacing: -1px; }
 .app-sidebar .brand-mark { width: 33px; height: 33px; flex: none; border-radius: 9px; background: #416d5b; }
 .app-sidebar .brand-mark svg { width: 27px; height: 27px; }
-.sidebar-heading { margin: 38px 14px 12px; color: #9aaca1; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; }
-.app-sidebar .app-navigation { display: grid; align-items: stretch; gap: 6px; }
+.app-sidebar .app-navigation { display: grid; align-items: stretch; gap: 6px; margin-top: 27px; }
 .app-sidebar .app-navigation a { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 0; border-radius: 6px; color: inherit; font-size: 13px; font-weight: 400; text-decoration: none; min-height: 46px; }
 .app-sidebar .app-navigation a:hover { background: #293f36; }
 .app-sidebar .app-navigation a[aria-current="page"] { background: #304c42; color: #f2f6ef; font-weight: 650; }
@@ -79,8 +78,7 @@
   .app-shell { grid-template-columns: 64px minmax(0, 1fr); }
   .app-sidebar { padding: 18px 8px 10px; }
   .app-sidebar .brand { padding: 0 7px; }
-  .sidebar-brand-name, .sidebar-heading, .app-sidebar .sidebar-label, .sidebar-arrow, .sidebar-connection { display: none; }
-  .app-sidebar .app-navigation { margin-top: 27px; }
+  .sidebar-brand-name, .app-sidebar .sidebar-label, .sidebar-arrow, .sidebar-connection { display: none; }
   .app-sidebar .app-navigation a { padding: 13px; }
   .sidebar-footer { padding: 20px 6px 0; }
   .sidebar-profile { padding-top: 16px; }

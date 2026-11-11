@@ -24,7 +24,7 @@ export function AppShell({ active, user, onMonitor, onPublishers, onAccounts, on
       <a className="brand" href="#monitor" aria-label="Services home" aria-disabled={disabled || undefined} onClick={event => { if (disabled || onMonitor) event.preventDefault(); if (!disabled) onMonitor?.() }}>
         <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="sidebar-brand-name">services</span>
       </a>
-      <p className="sidebar-heading">Workspace</p>
+
       <AppNavigation active={active} onMonitor={onMonitor} onPublishers={onPublishers} onAccounts={onAccounts} disabled={disabled} />
       <div className="sidebar-footer">
         {connection && <div className="sidebar-connection">{connection}</div>}
