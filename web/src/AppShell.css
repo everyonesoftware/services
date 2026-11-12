@@ -16,7 +16,10 @@
 .app-sidebar .connection.good { color: #b6dbbf; }
 .sidebar-profile { display: flex; align-items: center; gap: 10px; border-top: 1px solid #3a4d43; padding-top: 19px; min-width: 0; }
 .sidebar-avatar { display: grid; place-items: center; width: 33px; height: 33px; flex: none; border-radius: 50%; background: #304c42; color: #e8efe8; font-size: 12px; font-weight: 600; }
-.sidebar-user-details { min-width: 0; }
+.sidebar-user-details { min-width: 0; flex: 1; }
+.sidebar-settings { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin-left: auto; border-radius: 6px; color: inherit; text-decoration: none; }
+.sidebar-settings:hover, .sidebar-settings[aria-current="page"] { color: #f2f6ef; background: #304c42; }
+.sidebar-settings:focus-visible { outline: 2px solid #b6dbbf; outline-offset: 2px; }
 .sidebar-user { display: block; color: #e0e8e1; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .sidebar-user-details > span { display: block; font-size: 10px; color: #9aaca1; margin-top: 2px; }
 .sidebar-signout { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 14px 2px 0; border: 0; background: none; color: inherit; text-align: left; font-size: 12px; }
@@ -58,6 +61,7 @@
 .app-content .keys-card { margin-top: 0; }
 .app-content .accounts-workspace > .auth-card, .app-content .accounts-grid > .auth-card { max-width: 960px; }
 .app-content .auth-form:not(.key-form) { max-width: 520px; }
+.app-content .auth-form input { min-width: 0; }
 @media (max-width: 1050px) {
   .app-content .publisher-wizard { grid-template-columns: minmax(0, 1fr); }
   .app-content .publisher-steps { display: flex; gap: 4px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
@@ -82,7 +86,8 @@
   .sidebar-brand-name, .app-sidebar .sidebar-label, .sidebar-arrow, .sidebar-connection { display: none; }
   .app-sidebar .app-navigation a { padding: 13px; }
   .sidebar-footer { padding: 20px 6px 0; }
-  .sidebar-profile { padding-top: 16px; }
+  .sidebar-profile { padding-top: 16px; flex-direction: column; gap: 6px; }
+  .sidebar-settings { margin-left: 0; }
   .sidebar-user-details { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .sidebar-signout { justify-content: center; padding: 12px 0 0; }
   .app-content > .workspace { padding: 22px 16px; }
@@ -109,7 +114,7 @@
   .app-content .publisher-connection-head h2 { font-size: 17px; }
   .app-content .publisher-step-content { padding: 20px 16px; }
   .app-content .publisher-footer { padding: 15px 16px; }
-  .account-sections { gap: 18px; }
+  .account-sections { gap: 18px; flex-wrap: wrap; }
   .account-sections button { font-size: 11px; }
   .app-content .auth-card { padding: 16px; }
   .app-content .auth-list li { gap: 10px; flex-wrap: wrap; }

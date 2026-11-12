@@ -10,9 +10,9 @@ await server.listen()
 const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
 const screenshots = process.env.WORKSPACE_SCREENSHOT_DIR
 if (screenshots) await mkdir(screenshots, { recursive: true })
-const routes = ['monitor', 'activity', 'publishers', 'accounts']
-const titles = ['Services', 'Activity', 'Publishers', 'Accounts']
-const labels = ['Monitor', 'Activity', 'Publishers', 'Accounts']
+const routes = ['monitor', 'activity', 'publishers', 'settings']
+const titles = ['Services', 'Activity', 'Publishers', 'Settings']
+const labels = ['Monitor', 'Activity', 'Publishers', 'Settings']
 const wait = async predicate => {
   for (let attempt = 0; attempt < 150; attempt++) {
     if (await predicate()) return
@@ -43,7 +43,7 @@ async function exercise(viewport) {
     return Object.hasOwn(fixtures, path) ? route.fulfill({ json: fixtures[path] }) : route.fulfill({ status: 404 })
   })
   const go = async index => {
-    await page.getByRole('navigation', { name: 'Main navigation', exact: true }).getByRole('link', { name: labels[index], exact: true }).click()
+    await page.locator('.app-sidebar').getByRole('link', { name: labels[index], exact: true }).click()
     await page.getByRole('heading', { level: 1, name: titles[index], exact: true }).waitFor()
     await page.locator('.app-content').evaluate(element => { element.scrollTop = 0 })
   }

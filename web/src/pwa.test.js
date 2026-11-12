@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import vm from 'node:vm'
@@ -35,11 +35,83 @@ test('Services has standalone install metadata and real PNG home-screen icons', 
   assert.equal(publicFile('pwa/apple-touch-icon.png').readUInt32BE(16), 180)
 })
 
+async function buildFixture(directory) {
+  await mkdir(join(directory, 'assets'), { recursive: true })
+  await writeFile(join(directory, 'index.html'), '<!doctype html><html><head><title>Services</title></head><body><script src="/assets/app.js"></script></body></html>')
+  await writeFile(join(directory, 'assets/app.js'), 'console.log("Services")')
+  await writeFile(join(directory, 'assets/app.css'), 'body { color: black }')
+  await writeFile(join(directory, 'offline.html'), '<h1>Services is offline</h1>')
+}
+
+test('production build emits matching build identity metadata and is repeatable', async () => {
+  const { buildPwa } = await import('../scripts/build-pwa.mjs')
+  const directory = await mkdtemp(join(process.env.TMPDIR || tmpdir(), 'services-build-'))
+  try {
+    await buildFixture(directory)
+    await buildPwa(directory)
+    const metadata = await readFile(join(directory, 'web-build.json'), 'utf8')
+    const { id } = JSON.parse(metadata)
+    assert.match(id, /^[a-f0-9]{20}$/)
+    assert.deepEqual(JSON.parse(metadata), { id })
+    const html = await readFile(join(directory, 'index.html'), 'utf8')
+    assert.match(html, new RegExp(`<meta name="services-build" content="${id}">`))
+    assert.equal((html.match(/name="services-build"/g) || []).length, 1)
+    await buildPwa(directory)
+    assert.equal(await readFile(join(directory, 'web-build.json'), 'utf8'), metadata)
+    assert.equal(await readFile(join(directory, 'index.html'), 'utf8'), html)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('build identity follows all frontend bytes, not paths or generated artifacts', async () => {
+  const { buildPwa } = await import('../scripts/build-pwa.mjs')
+  const directories = await Promise.all([1, 2].map(() => mkdtemp(join(process.env.TMPDIR || tmpdir(), 'services-identity-'))))
+  const [directory, other] = directories
+  const identity = async dir => {
+    await buildPwa(dir)
+    return JSON.parse(await readFile(join(dir, 'web-build.json'), 'utf8')).id
+  }
+  try {
+    for (const dir of directories) {
+      await buildFixture(dir)
+      await mkdir(join(dir, 'pwa'))
+      await mkdir(join(dir, 'icons'))
+      await mkdir(join(dir, 'assets/lazy'))
+      const entries = [
+        ['manifest.webmanifest', '{"name":"Services"}'],
+        ['pwa/icon.png', 'icon bytes'], ['icons/service.svg', '<svg/>'],
+        ['assets/lazy/chunk.js', 'export default 1'], ['assets/lazy/chunk.css', '.lazy{}'],
+      ]
+      for (const [name, bytes] of dir === other ? entries.toReversed() : entries) await writeFile(join(dir, name), bytes)
+    }
+    const original = await identity(directory)
+    assert.equal(await identity(other), original, 'absolute directories and file creation order are excluded')
+    const worker = await readFile(join(directory, 'sw.js'), 'utf8')
+    for (const name of ['index.html', 'assets/app.js', 'assets/app.css', 'assets/lazy/chunk.js', 'assets/lazy/chunk.css', 'manifest.webmanifest', 'offline.html', 'pwa/icon.png', 'icons/service.svg']) {
+      const bytes = await readFile(join(directory, name))
+      await writeFile(join(directory, name), Buffer.concat([bytes, Buffer.from('\nchanged')]))
+      assert.notEqual(await identity(directory), original, `${name} changes build identity`)
+      await writeFile(join(directory, name), bytes)
+      assert.equal(await identity(directory), original, `${name} restores build identity`)
+    }
+    assert.equal(await readFile(join(directory, 'sw.js'), 'utf8'), worker)
+    await writeFile(join(directory, 'web-build.json'), '{"id":"stale"}')
+    await writeFile(join(directory, 'sw.js'), '// stale worker')
+    await writeFile(join(directory, 'assets/app.js.map'), 'ignored sourcemap')
+    assert.equal(await identity(directory), original, 'generated artifacts and source maps are excluded')
+    let html = await readFile(join(directory, 'index.html'), 'utf8')
+    html = html.replace(/<meta name="services-build"[^>]*>/, '<META content="stale" NAME=\'services-build\'><meta name=services-build content=stale>')
+    await writeFile(join(directory, 'index.html'), html)
+    assert.equal(await identity(directory), original, 'prior meta tags are normalized regardless of attribute order or quoting')
+    await writeFile(join(directory, 'index.html'), html.replace('</head>', '<meta data-name="services-build" content="not our tag"></head>'))
+    assert.notEqual(await identity(directory), original, 'unrelated data-name metadata remains part of the index')
+  } finally { await Promise.all(directories.map(dir => rm(dir, { recursive: true, force: true }))) }
+})
+
 test('production worker caches only a public offline screen, never authenticated data or actions', async () => {
   const { buildPwa } = await import('../scripts/build-pwa.mjs')
   const directory = await mkdtemp(join(process.env.TMPDIR || tmpdir(), 'services-pwa-'))
   try {
-    await writeFile(join(directory, 'offline.html'), '<h1>Services is offline</h1>')
+    await buildFixture(directory)
     await buildPwa(directory)
     const source = await readFile(join(directory, 'sw.js'), 'utf8')
     const handlers = {}, deleted = [], stored = [], claims = []

@@ -17,7 +17,7 @@ test('entry mounts auth gate and dashboard exposes optional account actions with
   assert.match(main, /<AuthGate\s*\/>/)
   const { default: App } = await server.ssrLoadModule('/src/App.tsx')
   const html = renderToStaticMarkup(createElement(App, { user: { username: 'admin' }, onAccounts() {}, onLogout() {} }))
-  assert.match(html, />Accounts</)
+  assert.match(html, /aria-label="Settings"/)
   assert.match(html, />Sign out</)
   assert.match(html, />admin</)
   assert.doesNotMatch(renderToStaticMarkup(createElement(App)), />Sign out</)

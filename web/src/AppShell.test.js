@@ -11,7 +11,7 @@ const { Publishers } = await server.ssrLoadModule('/src/Publishers.tsx')
 const { AuthAccounts } = await server.ssrLoadModule('/src/AuthAccounts.tsx')
 const props = { user: { id: 'admin', username: '<Admin & user>', role: 'admin' }, onBack() {}, onAccounts() {}, onPublishers() {}, onLogout() {}, onPasswordChanged() {} }
 
-for (const [component, active] of [[App, 'monitor'], [App, 'activity'], [Publishers, 'publishers'], [AuthAccounts, 'accounts']]) {
+for (const [component, active] of [[App, 'monitor'], [App, 'activity'], [Publishers, 'publishers'], [AuthAccounts, 'settings']]) {
   test(`${active} uses the shared sidebar with branding, navigation and signed-in user footer`, () => {
     const html = renderToStaticMarkup(createElement(component, { ...props, activePage: active }))
     assert.match(html, /class="app-shell"/)
@@ -20,9 +20,12 @@ for (const [component, active] of [[App, 'monitor'], [App, 'activity'], [Publish
     assert.match(sidebar, /aria-label="Services home"/)
     assert.match(sidebar, /class="brand-mark"/)
     assert.doesNotMatch(sidebar, />\s*Workspace\s*</)
-    const links = [...sidebar.matchAll(/<a [^>]*href="#(monitor|activity|publishers|accounts)"[^>]*>/g)]
+    const links = [...sidebar.matchAll(/<a [^>]*href="#(monitor|activity|publishers|settings)"[^>]*>/g)]
       .filter(match => !match[0].includes('class="brand"'))
-    assert.deepEqual(links.map(match => match[1]), ['monitor', 'activity', 'publishers', 'accounts'])
+    assert.deepEqual(links.map(match => match[1]), ['monitor', 'activity', 'publishers', 'settings'])
+    assert.doesNotMatch(sidebar.match(/<nav[^>]*>([\s\S]*?)<\/nav>/)[1], /Settings|Accounts/)
+    assert.match(sidebar, /class="sidebar-settings"[^>]*href="#settings"[^>]*aria-label="Settings"/)
+    assert.ok(sidebar.indexOf('sidebar-settings') > sidebar.indexOf('sidebar-user'))
     assert.equal(links.filter(match => match[0].includes('aria-current="page"')).length, 1)
     assert.ok(links.find(match => match[1] === active)[0].includes('aria-current="page"'))
     assert.match(sidebar, /class="sidebar-user"[^>]*>&lt;Admin &amp; user&gt;</)
@@ -40,13 +43,17 @@ test('signed-out direct monitor rendering does not fabricate a user or show sign
   assert.match(html, /Connecting/)
 })
 
-test('accounts starts with administrator settings selected and other credential panels hidden', () => {
+test('Settings opens Updates while preserving hidden administrator and credential panels', () => {
   const html = renderToStaticMarkup(createElement(AuthAccounts, props))
-  const sections = html.match(/<nav[^>]*aria-label="Account sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
+  assert.match(html, /<h1>Settings<\/h1>/)
+  const sections = html.match(/<nav[^>]*aria-label="Settings sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
   assert.ok(sections, 'account sections must have a labeled switcher')
-  assert.deepEqual([...sections.matchAll(/aria-pressed="(true|false)"[^>]*>([^<]+)</g)].map(match => [match[2], match[1]]), [['Administrators', 'true'], ['API keys', 'false'], ['Password', 'false']])
+  assert.deepEqual([...sections.matchAll(/aria-pressed="(true|false)"[^>]*>([^<]+)</g)].map(match => [match[2], match[1]]), [['Updates', 'true'], ['Administrators', 'false'], ['API keys', 'false'], ['Password', 'false']])
+  assert.match(html, /Web app updates/)
+  assert.match(html, /Check for updates/)
+  assert.match(html, /Finish or save any unsaved changes before reloading/)
   assert.match(html, /<section[^>]*aria-labelledby="admins-title"[^>]*>/)
-  assert.doesNotMatch(html, /<section[^>]*aria-labelledby="admins-title"[^>]*hidden/)
+  assert.match(html, /<section[^>]*aria-labelledby="admins-title"[^>]*hidden/)
   assert.match(html, /<section[^>]*aria-labelledby="password-title"[^>]*hidden=""/)
   assert.match(html, /<section[^>]*aria-labelledby="keys-title"[^>]*hidden=""/)
 })

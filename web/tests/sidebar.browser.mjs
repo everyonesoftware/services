@@ -13,8 +13,8 @@ const server = await createServer({ root: fileURLToPath(new URL('../', import.me
 let browser
 const failures = []
 const user = { id: 'fixture-admin', username: 'Browser fixture', role: 'admin' }
-const routes = ['monitor', 'activity', 'publishers', 'accounts']
-const labels = ['Monitor', 'Activity', 'Publishers', 'Accounts']
+const routes = ['monitor', 'activity', 'publishers', 'settings']
+const labels = ['Monitor', 'Activity', 'Publishers', 'Settings']
 const wait = async (predicate, message) => {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (await predicate()) return
@@ -99,16 +99,20 @@ async function exercise(viewport, name) {
     }, `${route}: expected its page title inside .app-content`)
     assert.equal(await page.evaluate(() => location.hash), `#${route}`)
     const links = nav().getByRole('link')
-    assert.deepEqual(await links.evaluateAll(elements => elements.map(element => element.getAttribute('href'))), routes.map(value => `#${value}`), 'All page shells share Monitor / Publishers / Accounts link order')
-    assert.deepEqual(await links.evaluateAll((elements, expected) => elements.map((element, index) => [...element.querySelectorAll('span')].some(span => span.textContent.trim() === expected[index])), labels), labels.map(() => true), 'Each navigation label has a text span; decorative spans are allowed')
-    assert.equal(await nav().locator('[aria-current]').count(), 1, 'Exactly one link has aria-current')
-    assert.equal(await nav().locator('[aria-current]').getAttribute('href'), `#${route}`)
-    assert.equal(await nav().locator('[aria-current]').getAttribute('aria-current'), 'page')
+    assert.deepEqual(await links.evaluateAll(elements => elements.map(element => element.getAttribute('href'))), routes.slice(0, 3).map(value => `#${value}`), 'Main navigation excludes Settings')
+    assert.deepEqual(await links.evaluateAll((elements, expected) => elements.map((element, index) => [...element.querySelectorAll('span')].some(span => span.textContent.trim() === expected[index])), labels.slice(0, 3)), [true, true, true], 'Main links retain their text labels')
+    assert.equal(await sidebar.locator('[aria-current]').count(), 1, 'Exactly one sidebar link has aria-current')
+    assert.equal(await sidebar.locator('[aria-current]').getAttribute('href'), `#${route}`)
+    assert.equal(await sidebar.locator('[aria-current]').getAttribute('aria-current'), 'page')
+    const gear = sidebar.locator('.sidebar-profile').getByRole('link', { name: 'Settings', exact: true })
+    assert.equal(await gear.isVisible(), true)
+    const gearBox = await gear.boundingBox()
+    assert.ok(gearBox.width >= 44 && gearBox.height >= 44, 'Settings has a touch-sized target')
     for (const [index, label] of labels.entries()) {
-      const link = nav().getByRole('link', { name: label, exact: true })
+      const link = sidebar.getByRole('link', { name: label, exact: true })
       assert.equal(await link.isVisible(), true, `${label} is accessible at ${name} width`)
       assert.equal(await link.getAttribute('href'), `#${routes[index]}`)
-      if (name === 'phone') {
+      if (name !== 'desktop') {
         assert.equal(await link.getAttribute('title'), label, 'Icon-only links retain a discoverable tooltip')
         assert.ok(await link.locator('svg, img, [role="img"]').count() > 0, 'Phone rail retains navigation icons')
       }
@@ -116,7 +120,7 @@ async function exercise(viewport, name) {
     await assertLayout()
   }
   const go = async route => {
-    await nav().getByRole('link', { name: labels[routes.indexOf(route)], exact: true }).click()
+    await sidebar.getByRole('link', { name: labels[routes.indexOf(route)], exact: true }).click()
     await assertPage(route)
     await markerSurvives()
   }
@@ -133,7 +137,7 @@ async function exercise(viewport, name) {
     await page.goBack(); await assertPage('monitor'); await markerSurvives()
     await page.goForward(); await assertPage('activity'); await markerSurvives()
     await page.goForward(); await assertPage('publishers'); await markerSurvives()
-    await page.goForward(); await assertPage('accounts'); await markerSurvives()
+    await page.goForward(); await assertPage('settings'); await markerSurvives()
 
     // Direct entries and full reloads must restore the correct page and active link.
     for (const route of routes) {
@@ -144,11 +148,18 @@ async function exercise(viewport, name) {
       await assertPage(route)
       assert.equal(await page.evaluate(() => window.__sidebarRegressionMarker), undefined, 'Reload assertion really replaced the document')
     }
+    // Preserve saved Accounts deep links while new navigation uses Settings.
+    await page.goto(`${server.resolvedUrls.local[0]}#accounts`)
+    await content.getByRole('heading', { level: 1, name: 'Settings', exact: true }).waitFor()
+    await page.reload()
+    await content.getByRole('heading', { level: 1, name: 'Settings', exact: true }).waitFor()
+    await sidebar.getByRole('link', { name: 'Settings', exact: true }).click()
+    await assertPage('settings')
     await mark()
-    const sections = content.getByRole('navigation', { name: 'Account sections', exact: true })
+    const sections = content.getByRole('navigation', { name: 'Settings sections', exact: true })
     const sectionLabels = ['Administrators', 'API keys', 'Password']
     assert.equal(await sections.count(), 1, 'Accounts needs navigation aria-label="Account sections" with Administrators / API keys / Password switch buttons')
-    assert.deepEqual(await sections.getByRole('button').allTextContents().then(text => text.map(value => value.trim())), sectionLabels)
+    assert.deepEqual(await sections.getByRole('button').allTextContents().then(text => text.map(value => value.trim())), ['Updates', ...sectionLabels])
     const cards = ['admins-title', 'keys-title', 'password-title'].map(id => content.locator(`section[aria-labelledby="${id}"]`))
     const selectSection = async index => {
       await sections.getByRole('button', { name: sectionLabels[index], exact: true }).click()
@@ -162,7 +173,7 @@ async function exercise(viewport, name) {
       await markerSurvives()
       await assertLayout()
     }
-    assert.equal(await sections.getByRole('button', { name: 'Administrators', exact: true }).getAttribute('aria-pressed'), 'true')
+    assert.equal(await sections.getByRole('button', { name: 'Updates', exact: true }).getAttribute('aria-pressed'), 'true')
     await selectSection(0)
     await cards[0].locator('strong').getByText(user.username, { exact: true }).waitFor()
     assert.equal(await cards[0].getByRole('button', { name: `Delete ${user.username}`, exact: true }).isDisabled(), true, 'Cannot delete signed-in administrator')
@@ -250,6 +261,7 @@ try {
   browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
   await exercise({ width: 1440, height: 1000 }, 'desktop')
   await exercise({ width: 390, height: 844 }, 'phone')
+  await exercise({ width: 320, height: 560 }, 'small-phone')
   assert.deepEqual(failures, [], 'Focused Console sidebar browser regressions')
   if (screenshotDirectory) console.log(`Screenshots: ${screenshotDirectory}`)
 } finally {

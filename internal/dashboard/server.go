@@ -156,6 +156,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/", "/index.html", "/sw.js", "/manifest.webmanifest", "/offline.html":
 		w.Header().Set("Cache-Control", "no-cache")
 	}
+	// Revalidate build metadata for reads without changing other static policies.
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/web-build.json" {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	var ok bool
 	r, ok = s.authorize(w, r)
 	if !ok {

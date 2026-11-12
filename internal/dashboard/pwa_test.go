@@ -3,6 +3,7 @@ package dashboard
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,7 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 	if err := os.MkdirAll(dist, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"index.html", "sw.js", "manifest.webmanifest", "offline.html"} {
+	for _, name := range []string{"index.html", "sw.js", "manifest.webmanifest", "offline.html", "web-build.json"} {
 		if err := os.WriteFile(filepath.Join(dist, name), []byte("fixture: "+name), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -24,7 +25,7 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 	t.Chdir(dir)
 	s, _ := securedServer(t)
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		for _, path := range []string{"/", "/index.html", "/sw.js", "/manifest.webmanifest", "/offline.html", "/sw.js?version=2"} {
+		for _, path := range []string{"/", "/index.html", "/sw.js", "/manifest.webmanifest", "/offline.html", "/sw.js?version=2", "/web-build.json", "/web-build.json?version=2"} {
 			t.Run(method+" "+path, func(t *testing.T) {
 				w := httptest.NewRecorder()
 				s.ServeHTTP(w, httptest.NewRequest(method, path, nil))
@@ -42,11 +43,10 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 					t.Errorf("HEAD returned a body: %q", w.Body.String())
 				}
 				if method == http.MethodGet && w.Code == http.StatusOK {
-					name := path[1:]
+					parsed, _ := url.Parse(path)
+					name := parsed.Path[1:]
 					if path == "/" {
 						name = "index.html"
-					} else if path == "/sw.js?version=2" {
-						name = "sw.js"
 					}
 					if got := w.Body.String(); got != "fixture: "+name {
 						t.Errorf("body = %q, want static fixture for %s", got, name)
@@ -59,7 +59,7 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 
 func TestPWACachePolicyLeavesOtherStaticPathsUnchanged(t *testing.T) {
 	dir := t.TempDir()
-	paths := []string{"/assets/app.js", "/nested/sw.js", "/sw.js.map", "/manifest.webmanifest.bak", "/offline.html.bak"}
+	paths := []string{"/assets/app.js", "/nested/sw.js", "/sw.js.map", "/manifest.webmanifest.bak", "/offline.html.bak", "/nested/web-build.json", "/web-build.json.bak"}
 	for _, path := range paths {
 		filename := filepath.Join(dir, "web", "dist", filepath.FromSlash(path[1:]))
 		if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
@@ -90,7 +90,7 @@ func TestPWACachePolicyLeavesOtherStaticPathsUnchanged(t *testing.T) {
 func TestPWACachePolicyPreservesAPIAuthentication(t *testing.T) {
 	s, _ := securedServer(t)
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		for _, path := range []string{"/api/projects", "/api/version", "/api/icons/images/sw.js", "/api/unknown", "/api/projects?asset=/sw.js"} {
+		for _, path := range []string{"/api/projects", "/api/version", "/api/icons/images/sw.js", "/api/unknown", "/api/projects?asset=/sw.js", "/api/web-build.json", "/api/projects?asset=/web-build.json"} {
 			t.Run(method+" "+path, func(t *testing.T) {
 				w := httptest.NewRecorder()
 				s.ServeHTTP(w, httptest.NewRequest(method, path, nil))

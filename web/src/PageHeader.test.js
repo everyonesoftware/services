@@ -41,14 +41,15 @@ const pageProps = { user: { id: 'admin', username: 'Administrator', role: 'admin
 
 for (const [module, name, title, actions] of [
   ['Publishers', 'Publishers', 'Publishers', ['Refresh', 'Connect repository']],
-  ['AuthAccounts', 'AuthAccounts', 'Accounts', ['Refresh']],
+  ['AuthAccounts', 'AuthAccounts', 'Settings', []],
 ]) {
   test(`${name} uses the shared title-only header with its existing actions`, async () => {
     const loaded = await server.ssrLoadModule(`/src/${module}.tsx`)
     const html = renderToStaticMarkup(createElement(loaded[name], pageProps))
     const header = html.match(/<header class="page-heading unified-page-header">([\s\S]*?)<\/header>/)?.[1]
     assert.ok(header, 'page must use the semantic shared header')
-    assert.ok(header.startsWith(`<h1>${title}</h1><div class="heading-actions">`))
+    assert.ok(header.startsWith(`<h1>${title}</h1>`))
+    assert.equal(header.includes('class="heading-actions"'), actions.length > 0)
     assert.deepEqual([...header.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map(match => match[1]), actions)
     assert.doesNotMatch(header, /<p|page-description|publisher-muted/)
     assert.doesNotMatch(html, /Manage administrator access and API credentials\./)

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { authRequest } from './authApi.ts'
 import { AppShell } from './AppShell.tsx'
 import { PageHeader } from './PageHeader.tsx'
+import { WebAppUpdates } from './WebAppUpdates.tsx'
 import type { ApiKey, AuthUser } from './authApi.ts'
 
 import { canDeleteUser, keyPayload } from './authAccountModel.ts'
@@ -19,7 +20,7 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
   const [notice, setNotice] = useState('')
   const [token, setToken] = useState('')
   const [publisher, setPublisher] = useState(false)
-  const [section, setSection] = useState('Administrators')
+  const [section, setSection] = useState('Updates')
   const load = useCallback(async () => {
     const [accounts, credentials] = await Promise.all([authRequest<{ users: AuthUser[] }>('/users'), authRequest<{ keys: ApiKey[] }>('/keys')])
     setUsers(accounts.users); setKeys(credentials.keys); setLoaded(true)
@@ -65,10 +66,11 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
       await load()
     })
   }
-  return <AppShell active="accounts" user={user} onMonitor={onBack} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
-    <main className="workspace accounts-workspace"><PageHeader title="Accounts" actions={<button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button>} />
+  return <AppShell active="settings" user={user} onMonitor={onBack} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
+    <main className="workspace accounts-workspace"><PageHeader title="Settings" actions={section !== 'Updates' && <button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button>} />
     {error && <p role="alert" className="notice danger">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
-    <nav className="account-sections" aria-label="Account sections">{['Administrators', 'API keys', 'Password'].map(name => <button type="button" key={name} aria-pressed={section === name} disabled={busy} onClick={() => setSection(name)}>{name}</button>)}</nav>
+    <nav className="account-sections" aria-label="Settings sections">{['Updates', 'Administrators', 'API keys', 'Password'].map(name => <button type="button" key={name} aria-pressed={section === name} disabled={busy} onClick={() => setSection(name)}>{name}</button>)}</nav>
+    <WebAppUpdates hidden={section !== 'Updates'} disabled={busy} />
     <div className="accounts-grid"><section className="auth-card" aria-labelledby="admins-title" hidden={section !== 'Administrators'}><h2 id="admins-title">Administrators</h2><p className="auth-help">All administrator accounts have full access. Your current account and the last administrator cannot be deleted.</p>
     {!loaded ? <p role="status">{error ? 'Accounts unavailable. Use Refresh to retry.' : 'Loading accounts…'}</p> : <ul className="auth-list">{users.map(account => <li key={account.id}><div><strong>{account.username}</strong><span className="auth-help">{account.role}{account.id === user.id ? ' · You' : ''}</span></div><button className="button secondary" disabled={busy || !canDeleteUser(account, user.id, users)} onClick={() => {
       if (window.confirm(`Delete administrator ${account.username}? This cannot be undone.`)) void perform(async () => { await authRequest(`/users/${encodeURIComponent(account.id)}`, { method: 'DELETE' }); await load(); setNotice('Administrator deleted.') })
