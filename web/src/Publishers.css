@@ -37,7 +37,7 @@
 .publisher-step-content { padding: 28px 32px; }
 .app-content:has(> .publisher-setup-workspace) { display: flex; flex-direction: column; overflow: hidden; }
 .app-content > .publisher-setup-workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.publisher-setup-workspace > .page-heading, .publisher-setup-workspace > .notice, .publisher-setup-workspace > .publisher-explain { flex: none; }
+.publisher-setup-workspace > .breadcrumb, .publisher-setup-workspace > .page-heading, .publisher-setup-workspace > .notice, .publisher-setup-workspace > .publisher-explain { flex: none; }
 .publisher-setup-workspace > .publisher-wizard { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .publisher-setup-workspace .publisher-steps { min-height: 0; overflow: auto; }
 .publisher-setup-workspace .publisher-wizard-content { min-height: 0; }
@@ -225,6 +225,9 @@
   .publisher-facts { grid-template-columns: minmax(0, 1fr); gap: 14px; }
 }
 @media (max-width: 640px) {
+  /* Static location text need not consume a touch-target row on a short screen. */
+  .publisher-setup-workspace > .breadcrumb { margin-bottom: 0; }
+  .publisher-setup-workspace > .breadcrumb [aria-current] { min-height: 24px; padding-top: 0; padding-bottom: 0; }
   .app-content .publishers-workspace { font-size: 16px; line-height: 1.5; }
   .app-content .publishers-workspace h1,
   .app-content .publishers-workspace h2,

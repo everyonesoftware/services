@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { checkForUpdates, undoResolution } from './api.ts'
 import { availableServices, canUpdateProject, connectionState, isSnoozed, needsAttention, projectsWithOperations, selectProjects } from './monitor.ts'
-import type { Filter, IconList, Incident, Monitor, Operation, Project } from './types.ts'
+import type { Container, Filter, IconList, Incident, Monitor, Operation, Project } from './types.ts'
 import { resolutionEntries } from './resolution.ts'
 import { ResolutionDialog } from './ResolutionDialog.tsx'
 import type { ResolutionTarget } from './ResolutionDialog.tsx'
@@ -11,12 +11,15 @@ import './App.css'
 import './ResolutionDialog.css'
 import { AppShell } from './AppShell.tsx'
 import { ProjectGroup } from './ProjectGroup.tsx'
+import { ContainerDetail, ServiceDetail } from './ServiceDetails.tsx'
+import { Breadcrumb } from './Breadcrumb.tsx'
+import { serviceHref, serviceRoute } from './navigation.ts'
 import { UpdateDialog } from './UpdateDialog.tsx'
 import { DockerActivity } from './DockerActivity.tsx'
 import { ActivityFeed } from './ActivityFeed.tsx'
 import { PageHeader } from './PageHeader.tsx'
 import { FilterSearch, FilterToolbar, IconDropdown, ResetView } from './FilterToolbar.tsx'
-export { ProjectGroup, UpdateDialog, DockerActivity }
+export { ProjectGroup, ServiceDetail, ContainerDetail, UpdateDialog, DockerActivity }
 
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed'
 const timeLabel = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Not yet checked'
@@ -92,11 +95,35 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
   const [filter, setFilter] = useState<Filter>('all')
   const search = useRef<HTMLInputElement>(null)
   const [checking, setChecking] = useState(false)
-  const [updateTarget, setUpdateTarget] = useState<Project | null>(null)
+  // A fresh wrapper identifies each review, including reopening the same project.
+  const [updateTarget, setUpdateTarget] = useState<{ project: Project } | null>(null)
   const checkLock = useRef(false)
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
+  const [hash, setHash] = useState(() => typeof window === 'undefined' ? '' : window.location.hash)
+  const scrollPositions = useRef(new Map<string, number>())
+  const route = serviceRoute(hash)
+  useEffect(() => {
+    let currentKey = window.location.hash || '#monitor'
+    const changed = () => {
+      // Capture before React swaps a long list for a shorter page and clamps its scroll.
+      scrollPositions.current.set(currentKey, document.getElementById('page-content')?.scrollTop ?? 0)
+      currentKey = window.location.hash || '#monitor'
+      setHash(window.location.hash); setUpdateTarget(null); setIconTarget(null)
+    }
+    window.addEventListener('hashchange', changed)
+    return () => window.removeEventListener('hashchange', changed)
+  }, [])
+  useLayoutEffect(() => {
+    const content = document.getElementById('page-content')
+    if (!content) return
+    const positions = scrollPositions.current
+    const key = hash || '#monitor'
+    content.scrollTop = positions.get(key) ?? 0
+    const heading = content.querySelector('h1')
+    if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }) }
+  }, [hash, activePage])
   const projects = projectsWithOperations(projectsRequest.data?.projects ?? [], operations, projectsRequest.refreshing)
-  const currentUpdateProject = updateTarget && projects.find(project => project.name === updateTarget.name)
+  const currentUpdateProject = updateTarget && projects.find(project => project.name === updateTarget.project.name)
   // Invalidate before committing stale review content, not in a later effect.
   // Never replace the reviewed snapshot: a newer image requires a new review.
   if (updateTarget && (!currentUpdateProject || !canUpdateProject(currentUpdateProject))) setUpdateTarget(null)
@@ -148,11 +175,36 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
     finally { checkLock.current = false; setChecking(false) }
   }
 
+  const feedback = <>
+    {notice && <div role={notice.error ? 'alert' : 'status'} className={`notice resolution-notice ${notice.error ? 'danger' : ''}`}><span>{notice.text}</span>{undoToken && <button type="button" className="button secondary" disabled={undoPending || resolutionPending || !connected} onClick={() => void undo()}>{undoPending ? 'Undoing…' : 'Undo'}</button>}</div>}
+    {!connected && <p className={`notice ${connection === 'connecting' ? '' : 'danger'}`} role={connection === 'connecting' ? 'status' : 'alert'}>{connection === 'connecting' ? 'Connecting…' : `Monitoring interrupted: ${error || monitor?.error || (connection === 'stale' ? 'Monitoring data is stale.' : 'Engine disconnected.')}. Last observed data is shown; current state cannot be confirmed.`}</p>}
+  </>
+  const detailProps = (project: Project) => ({
+    project, onReview: (reviewed: Project) => setUpdateTarget({ project: reviewed }), icons: iconsRequest.data?.icons, iconsAvailable, onEditIcon: setIconTarget,
+    onResolve: (container: Container, trigger: HTMLElement) => { const incident = missingIncidents.find(item => item.project === project.name && item.name === container.name && item.service === (container.service || '')); if (incident) resolve([incident], trigger) },
+    resolveDisabled: !connected || undoPending || resolutionPending,
+    actionsDisabled: !connected || checking || updateTarget !== null || resolutionTarget !== null || undoPending,
+    events, eventsLoading: monitorRequest.loading, eventsError, feedback,
+  })
+  const detailFallback = (title: string, explanation: string, retry = false) => <main className="workspace service-detail"><Breadcrumb project={route.kind === 'service' ? route.project : undefined} container={route.kind === 'service' ? route.container : undefined} current={route.kind === 'invalid' ? 'Page not found' : undefined} /><PageHeader title={title} />{feedback}<div className="empty-state"><p>{explanation}</p>{retry && <button className="button secondary" onClick={projectsRequest.refresh}>Try again</button>}<a className="button secondary" href={route.kind === 'service' && route.container ? serviceHref(route.project) : '#monitor'}>{route.kind === 'service' && route.container ? 'Back to service' : 'Back to Monitor'}</a></div></main>
+  const renderDetail = () => {
+    if (route.kind === 'invalid') return detailFallback('Page not found', 'This service link is not valid. Return to Monitor to choose a service.')
+    if (route.kind !== 'service') return null
+    if (projectsRequest.loading) return detailFallback('Loading services', 'Retrieving the latest inventory…')
+    if (!projectsRequest.data) return detailFallback('Services couldn’t be loaded', projectsRequest.error || 'Inventory is unavailable.', true)
+    const project = projects.find(item => item.name === route.project)
+    if (!project) return projectsRequest.error ? detailFallback('Services couldn’t be loaded', projectsRequest.error, true) : detailFallback('Service not found', 'This service is not in the current inventory. It may have been removed or renamed.')
+    if (route.container === undefined) return <ServiceDetail {...detailProps(project)} />
+    const container = project.containers.find(item => item.name === route.container)
+    if (!container) return projectsRequest.error ? detailFallback('Services couldn’t be loaded', projectsRequest.error, true) : detailFallback('Container not found', 'This container is not in this service’s current inventory. Return to the service to choose a container.')
+    return <ContainerDetail {...detailProps(project)} container={container} />
+  }
+
   return <AppShell active={activePage} user={user} onAccounts={onAccounts} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} connection={<span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>}>
-    {activePage === 'activity' ? <ActivityFeed operations={operations} events={events} operationsLoading={operationsRequest.loading} eventsLoading={monitorRequest.loading} operationsError={operationsRequest.error} eventsError={eventsError} now={now} onAcknowledged={operationsRequest.refresh} /> : <main className="workspace">
+    {activePage === 'activity' ? <ActivityFeed operations={operations} events={events} operationsLoading={operationsRequest.loading} eventsLoading={monitorRequest.loading} operationsError={operationsRequest.error} eventsError={eventsError} now={now} onAcknowledged={operationsRequest.refresh} /> : route.kind !== 'monitor' ? renderDetail() : <main className="workspace">
+      <Breadcrumb />
       <PageHeader title="Services" id="services-title" actions={<><button className="button secondary monitor-header-action" onClick={refresh} type="button" aria-label="Refresh" title="Refresh"><span aria-hidden="true">↻</span><span className="monitor-action-label">Refresh</span></button><button className="button primary monitor-header-action" onClick={() => void check()} disabled={checking || !connected} type="button" aria-label={checking ? 'Checking images…' : 'Check for updates'} title={checking ? 'Checking images…' : 'Check for updates'}><svg className="monitor-check-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" /></svg><span className="monitor-action-label">{checking ? 'Checking images…' : 'Check for updates'}</span></button></>} />
-      {notice && <div role={notice.error ? 'alert' : 'status'} className={`notice resolution-notice ${notice.error ? 'danger' : ''}`}><span>{notice.text}</span>{undoToken && <button type="button" className="button secondary" disabled={undoPending || resolutionPending || !connected} onClick={() => void undo()}>{undoPending ? 'Undoing…' : 'Undo'}</button>}</div>}
-      {!connected && <p className={`notice ${connection === 'connecting' ? '' : 'danger'}`} role={connection === 'connecting' ? 'status' : 'alert'}>{connection === 'connecting' ? 'Connecting…' : `Monitoring interrupted: ${error || monitor?.error || (connection === 'stale' ? 'Monitoring data is stale.' : 'Engine disconnected.')}. Last observed data is shown; current state cannot be confirmed.`}</p>}
+      {feedback}
 
       {incidents.length > 0 && <section className="incidents" aria-labelledby="incident-heading"><div className="section-title"><h2 id="incident-heading">{activeIncidents.length ? 'Needs attention' : 'Missing · alerts snoozed'} <span className="count">{activeIncidents.length || snoozedMissing.length}</span></h2><span className="section-note">{connected ? 'Observed incidents' : 'Last observed incidents'}</span></div><div className="incident-list">{incidents.map(incident => <article className={`incident ${incident.status === 'missing' && isSnoozed(incident.snoozedUntil, now) ? 'snoozed-incident' : ''}`} key={incident.id}><span className="incident-mark" aria-hidden="true">{incident.status === 'missing' && isSnoozed(incident.snoozedUntil, now) ? '◌' : '!'}</span><div className="incident-copy"><h3>{incident.project} <span>/</span> {incident.service || incident.name}</h3><p>{incident.reason || incident.status}</p>{incident.status === 'missing' && isSnoozed(incident.snoozedUntil, now) && <p>Missing · alerts snoozed until {new Date(incident.snoozedUntil!).toLocaleString()}</p>}</div><time title={incident.since}>Since {timeLabel(incident.since)}</time>{incident.status === 'missing' && <button className="button secondary incident-resolve" type="button" disabled={!connected || undoPending || resolutionPending} onClick={event => resolve([incident], event.currentTarget)}>Resolve…</button>}</article>)}</div>{missingIncidents.length > 1 && <div className="resolution-batch"><span>Review and handle missing entries together.</span><button className="button secondary" type="button" disabled={!connected || undoPending || resolutionPending} onClick={event => resolve(missingIncidents, event.currentTarget)}>Resolve {missingIncidents.length === 2 ? 'both' : 'all'} missing entries…</button></div>}</section>}
       <section id="services" aria-labelledby="services-title">
@@ -167,11 +219,11 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
             {(query || filter !== 'all') && <ResetView onClick={() => { setQuery(''); setFilter('all'); search.current?.focus({ preventScroll: true }) }} />}
           </div>
         </FilterToolbar>
-        {projectsRequest.loading ? <div className="empty-state" role="status"><span className="loading-mark" /> <h3>Loading services</h3></div> : !projectsRequest.data && projectsRequest.error ? <div className="empty-state"><h3>Services couldn’t be loaded</h3><p>{projectsRequest.error}</p><button className="button secondary" onClick={projectsRequest.refresh}>Try again</button></div> : visible.length === 0 ? <div className="empty-state"><span className="empty-mark" aria-hidden="true">⌕</span><h3>{projects.length ? 'No matching services' : 'No containers discovered'}</h3><p>{projects.length ? 'Try a different search or switch to All.' : 'Containers will appear here when your engine reports them.'}</p>{projects.length > 0 && <button className="button secondary" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</button>}</div> : <div className="project-list">{visible.map(project => <ProjectGroup key={project.name} project={project} onReview={setUpdateTarget} icons={iconsRequest.data?.icons} iconsAvailable={iconsAvailable} onEditIcon={setIconTarget} onResolve={(container, trigger) => { const incident = missingIncidents.find(item => item.project === project.name && item.name === container.name && item.service === (container.service || '')); if (incident) resolve([incident], trigger) }} resolveDisabled={!connected || undoPending || resolutionPending} actionsDisabled={!connected || checking || updateTarget !== null || resolutionTarget !== null || undoPending} />)}</div>}
+        {projectsRequest.loading ? <div className="empty-state" role="status"><span className="loading-mark" /> <h3>Loading services</h3></div> : !projectsRequest.data && projectsRequest.error ? <div className="empty-state"><h3>Services couldn’t be loaded</h3><p>{projectsRequest.error}</p><button className="button secondary" onClick={projectsRequest.refresh}>Try again</button></div> : visible.length === 0 ? <div className="empty-state"><span className="empty-mark" aria-hidden="true">⌕</span><h3>{projects.length ? 'No matching services' : 'No containers discovered'}</h3><p>{projects.length ? 'Try a different search or switch to All.' : 'Containers will appear here when your engine reports them.'}</p>{projects.length > 0 && <button className="button secondary" onClick={() => { setQuery(''); setFilter('all') }}>Clear filters</button>}</div> : <div className="project-list">{visible.map(project => <ProjectGroup key={project.name} {...detailProps(project)} />)}</div>}
       </section>
     </main>}
     {resolutionTarget && <ResolutionDialog target={resolutionTarget} connected={connected} onClose={() => setResolutionTarget(null)} onPending={resolutionBusy} onResolved={token => { setUndoToken(token); setNotice({ text: 'Resolution applied. Docker resources unchanged.', error: false }); projectsRequest.refresh(); monitorRequest.refresh() }} />}
     {iconTarget && <IconDialog target={iconTarget} available={iconsAvailable} onClose={() => setIconTarget(null)} onSaved={(next, reset) => { iconsRequest.replace(next); setNotice({ text: reset ? 'Default icon restored.' : 'Icon saved locally.', error: false }) }} />}
-    {updateTarget && <UpdateDialog key={updateTarget.name} project={updateTarget} onClose={() => setUpdateTarget(null)} onUpdated={operation => { if (operation) setAcceptedOperations(current => [...current.filter(item => item.id !== operation.id), operation]); refresh() }} engineBusy={engineBusy} />}
+    {updateTarget && <UpdateDialog key={updateTarget.project.name} project={updateTarget.project} onClose={() => setUpdateTarget(current => current === updateTarget ? null : current)} onUpdated={operation => { if (operation) setAcceptedOperations(current => [...current.filter(item => item.id !== operation.id), operation]); refresh() }} engineBusy={engineBusy} />}
   </AppShell>
 }

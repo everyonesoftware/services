@@ -1,60 +1,31 @@
-/* One health badge and one update action, shared across viewport sizes. */
-.app-content .project-summary {
-  display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto auto;
-  column-gap: 10px;
-  row-gap: 3px;
-}
-.app-content .project-summary > .disclosure { grid-column: 1; grid-row: 1 / 3; }
-.app-content .project-summary .group-identity,
-.app-content .project-summary .project-metadata { display: contents; }
-.app-content .project-summary .identity-name { grid-column: 2; grid-row: 1; }
-.app-content .project-summary-counts { grid-column: 2; grid-row: 2; font-size: 10px; color: var(--muted); }
-.app-content .project-health { grid-column: 4; grid-row: 1 / 3; }
-.app-content .project-signals { grid-column: 3; grid-row: 1 / 3; }
+/* Navigation links and mutation controls are separate, never nested. */
+.app-content .project-summary { display: flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 76px; }
+.app-content .project-summary .project-link { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; min-height: 76px; text-decoration: none; padding: 12px 0; }
+.app-content .project-summary .group-identity { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.app-content .project-summary .identity-name { font-size: 14px; font-weight: 600; }
+.app-content .project-summary .project-metadata { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 11px; color: var(--muted); }
+.app-content .project-summary-counts { font-size: 11px; color: var(--muted); }
+.app-content .project-summary .project-health { width: auto; padding: 0; gap: 0; }
+.app-content .project-health::before { content: '·'; margin-right: 8px; }
+.app-content .project-health .status-badge { padding: 0; border: 0; background: none; }
+.app-content .project-summary .project-signals { width: auto; padding: 0; flex: none; }
+.navigation-arrow { font-size: 23px; line-height: 1; color: #7e8d7f; flex: none; }
+.app-content .project-summary .icon-button { flex: none; }
 .app-content .project-update { font-size: 10px; color: #7a683c; border-color: #d9cdaa; white-space: nowrap; }
-.app-content .project-update-help { padding: 10px 14px; font-size: 12px; color: var(--muted); }
-
-/* Inset container cards keep identity, image and health together. */
-.app-content .project-group > .group-body { padding: 12px; background: #f0f2eb; }
-.app-content .project-group .container-detail { min-width: 0; border: 1px solid #dce2d5; border-radius: 6px; background: var(--surface); overflow: clip; }
-.app-content .project-group .container-detail + .container-detail { margin-top: 9px; }
-.app-content .project-group .container-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; align-items: center; gap: 8px 14px; min-height: 64px; padding: 14px 12px; }
-.app-content .project-group .container-identity { grid-column: 1; grid-row: 1; width: auto; min-width: 0; }
-.app-content .project-group .container-identity strong { font-size: 13px; font-weight: 600; }
-.app-content .project-group .container-observation { grid-column: 2; grid-row: 1; min-width: 0; padding: 0; margin: 0; order: 0; }
-.app-content .project-group .container-observation code { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.app-content .project-group .container-end { grid-column: 3; grid-row: 1; min-width: 0; margin: 0; gap: 8px; }
-.app-content .project-group .container-end .status-badge { padding: 3px 7px; border-color: #cadbcf; background: #edf4ed; }
-.app-content .project-group .container-end .status-badge.caution { border-color: #e4d8b8; background: #f7f2e4; }
-.app-content .project-group .container-end .status-badge.bad { border-color: #e7cfc3; background: #fbefea; }
-.app-content .project-group .container-inspection { padding: 14px; border-top: 1px solid #e3e7dc; }
+.app-content .project-update-help { font-size: 12px; color: var(--muted); margin-top: 12px; }
 
 @media (max-width: 640px) {
-  .app-content .project-summary { grid-template-columns: 12px minmax(0, 1fr) auto; gap: 7px 8px; min-height: 94px; padding: 16px 12px; }
-  .app-content .project-summary > .disclosure { align-self: start; margin-top: 4px; font-size: 24px; }
-  .app-content .project-summary .identity-name { font-size: 18px; line-height: 24px; font-weight: 600; gap: 6px; }
-  .app-content .project-summary .project-metadata { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; grid-column: 2; grid-row: 2; font-size: 14px; line-height: 20px; color: #59685e; }
+  .app-content .project-summary { flex-wrap: nowrap; gap: 8px; min-height: 94px; padding: 0 12px; }
+  .app-content .project-summary .project-link { min-height: 94px; gap: 8px; padding: 14px 0; }
+  .app-content .project-summary .identity-name { font-size: 18px; line-height: 24px; font-weight: 600; }
+  .app-content .project-summary .project-metadata { gap: 2px 6px; font-size: 14px; line-height: 20px; color: #59685e; }
   .app-content .project-summary-counts { font-size: 14px; line-height: 20px; }
-
-  .app-content .project-summary .project-health,
-  .app-content .project-summary .project-signals { width: auto; padding: 0; justify-content: flex-start; }
-  .app-content .project-health { min-width: 0; flex-direction: row; align-items: center; gap: 0; }
-  .app-content .project-health::before { content: '·'; margin-right: 6px; }
+  .app-content .project-summary .project-health { min-width: 0; flex-direction: row; align-items: center; }
+  .app-content .project-summary .project-health::before { margin-right: 6px; }
   .app-content .project-health .status-badge { font-size: 14px; line-height: 20px; padding: 0; border: 0; background: transparent; white-space: normal; }
   .app-content .project-health .status-badge i { width: 5px; height: 5px; }
-  .app-content .project-signals { grid-column: 3; grid-row: 1 / 3; align-self: center; }
   .app-content .project-update { min-height: 48px; padding: 10px; font-size: 16px; line-height: 22px; }
   .app-content .project-update-help { font-size: 14px; }
-  .app-content .project-group .container-summary { grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 14px 10px; }
-  .app-content .project-group .container-identity strong { font-size: 16px; line-height: 24px; }
-  .app-content .project-group .container-observation { grid-column: 1 / -1; grid-row: 2; }
-  .app-content .project-group .container-observation code { font-size: 13px; line-height: 20px; }
-  .app-content .project-group .container-observation p { font-size: 14px; line-height: 20px; }
-  .app-content .project-group .container-end { grid-column: 2; display: grid; grid-template-columns: auto 10px; gap: 6px; align-items: center; }
-  .app-content .project-group .container-end .status-badge { grid-column: 1; grid-row: 1; font-size: 12px; line-height: 18px; white-space: normal; }
-  .app-content .project-group .container-end .row-resolve { grid-column: 1; grid-row: 2; }
-  .app-content .project-group .container-end .disclosure { grid-column: 2; grid-row: 1 / 3; }
 
   .update-dialog.project-update-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 48px); font-size: 16px; }
   .update-dialog.project-update-dialog .dialog-header { padding: 20px 20px 12px; }
@@ -80,9 +51,4 @@
   .update-dialog.project-update-dialog .dialog-actions { flex: none; padding: 14px 20px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
   .update-dialog.project-update-dialog .dialog-actions > span { grid-column: 1 / -1; font-size: 14px; line-height: 20px; }
   .update-dialog.project-update-dialog .dialog-actions .button { min-width: 0; min-height: 48px; font-size: 16px; line-height: 22px; padding: 12px 8px; white-space: normal; }
-}
-
-@media (max-width: 360px) {
-  .app-content .project-summary .project-metadata { grid-column: 2 / -1; }
-  .app-content .project-summary .project-signals { grid-row: 1; }
 }

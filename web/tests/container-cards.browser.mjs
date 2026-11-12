@@ -11,7 +11,7 @@ const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 
 const screenshots = process.env.CONTAINER_CARDS_SCREENSHOT_DIR
 if (screenshots) await mkdir(screenshots, { recursive: true })
 const image = 'ghcr.io/everyonesoftware/a-very-long-image-name-for-overflow-verification:latest'
-const container = (name, overrides = {}) => ({ id: name, name, project: 'agent', service: name, image, state: 'running', health: 'healthy', monitorStatus: 'healthy', restartCount: 0, healthOutput: 'Health check passed.', ...overrides })
+const container = (name, overrides = {}) => ({ id: name, name, project: 'agent', service: name, image, state: 'running', health: 'healthy', monitorStatus: 'healthy', restartCount: 0, exitCode: 0, oomKilled: false, startedAt: '2026-11-12T09:00:00Z', healthOutput: 'Health check passed.', ...overrides })
 const projects = [
   { name: 'agent', status: 'healthy', containers: [container('agent', { name: 'agent-web-1', service: 'web', updateAvailable: true, currentDigest: 'sha256:old', proposedDigest: 'sha256:new' }), container('agent-tailscale', { name: 'agent-web-2', service: 'web', image: 'tailscale/tailscale:latest' })] },
   { name: 'audiobookshelf', status: 'running-unverified', containers: [container('audiobookshelf-with-a-long-container-name', { project: 'audiobookshelf', monitorStatus: 'running-unverified', health: '' })] },
@@ -39,68 +39,101 @@ try {
     const agent = page.locator('.project-group').filter({ has: page.locator('.project-summary .identity-name', { hasText: /^agent$/ }) })
     await agent.waitFor()
     assert.equal(await agent.locator('.project-summary-counts').innerText(), '2 containers', 'Replica count must not collapse to the unique service count')
-    await agent.locator('.project-summary').click()
-    const cards = agent.locator('.container-detail')
-    const geometry = await agent.evaluate(element => {
-      const body = element.querySelector('.group-body'), cards = [...body.querySelectorAll('.container-detail')]
-      const b = body.getBoundingClientRect(), first = cards[0].getBoundingClientRect(), second = cards[1].getBoundingClientRect()
-      return { inset: first.left - b.left, rightInset: b.right - first.right, gap: second.top - first.bottom, radius: getComputedStyle(cards[0]).borderRadius, border: getComputedStyle(cards[0]).borderTopWidth, background: getComputedStyle(body).backgroundColor }
+    assert.equal(await agent.evaluate(element => element.tagName), 'ARTICLE')
+    assert.equal(await agent.locator('div.group-summary.project-summary').count(), 1)
+    assert.equal(await agent.locator('details, .container-row, .container-inspection').count(), 0, 'Monitor services are compact, not nested container disclosures')
+    const projectLink = agent.locator('a.project-link')
+    assert.equal(await projectLink.getAttribute('href'), `#service/${encodeURIComponent('agent')}`)
+    await projectLink.click()
+    await page.locator('.service-detail').getByRole('heading', { name: 'agent', level: 1, exact: true }).waitFor()
+    const breadcrumb = page.locator('nav[aria-label="Breadcrumb"]')
+    assert.equal(await breadcrumb.getByRole('link', { name: 'Monitor', exact: true }).count(), 1)
+    const cards = page.locator('.service-detail .container-row')
+    assert.equal(await cards.count(), 2)
+    assert.equal(await page.locator('.service-detail details, .service-detail .container-inspection').count(), 0)
+    assert.deepEqual(await cards.locator('a.container-link .identity-name').allTextContents().then(names => names.map(name => name.trim())), ['agent-web-1', 'agent-web-2'])
+    for (const [index, name] of ['agent-web-1', 'agent-web-2'].entries()) {
+      assert.equal(await cards.nth(index).locator('a.container-link').getAttribute('href'), `#service/agent/${encodeURIComponent(name)}`)
+      assert.equal(await cards.nth(index).locator('a.container-link button').count(), 0, 'Icon and action buttons are independent of navigation links')
+      assert.equal(await cards.nth(index).locator('div.container-summary').count(), 1)
+    }
+    const geometry = await cards.first().evaluate(first => {
+      const second = first.nextElementSibling, a = first.getBoundingClientRect(), b = second.getBoundingClientRect()
+      const style = getComputedStyle(first)
+      return { gap: Math.max(b.top - a.bottom, b.left - a.right), radius: parseFloat(style.borderRadius), border: parseFloat(style.borderTopWidth) }
     })
-    assert.ok(geometry.inset >= 10 && geometry.rightInset >= 10, `${width}: container cards inset from the project: ${JSON.stringify(geometry)}`)
-    assert.ok(geometry.gap >= 8, `${width}: separate container cards have a visible gap`)
-    assert.equal(geometry.radius, '6px')
-    assert.equal(geometry.border, '1px')
-    assert.equal(geometry.background, 'rgb(240, 242, 235)')
-    assert.equal(await agent.locator('.project-expanded-facts, .container-dot').count(), 0)
-    assert.equal(await cards.first().locator('.container-identity > span').count(), 0, 'Actual container name belongs in diagnostics, not a redundant summary line')
+    assert.ok(geometry.gap >= 8, `${width}: separate clickable container cards have a visible gap: ${JSON.stringify(geometry)}`)
+    assert.ok(geometry.radius > 0 && geometry.border >= 1, 'Cards retain distinct rounded boundaries')
     const first = cards.first()
     const row = first.locator('.container-summary')
     assert.ok((await row.boundingBox()).height >= 48)
-    if (width <= 640) {
-      const layout = await row.evaluate(element => {
-        const name = element.querySelector('.container-identity').getBoundingClientRect(), status = element.querySelector('.status-badge').getBoundingClientRect(), image = element.querySelector('.container-observation').getBoundingClientRect()
-        return { nameY: name.y, statusY: status.y, nameRight: name.right, statusLeft: status.left, imageY: image.y, nameBottom: name.bottom }
-      })
-      assert.ok(Math.abs(layout.nameY - layout.statusY) < 8, `${width}: name and health share the first line`)
-      assert.ok(layout.nameRight <= layout.statusLeft, `${width}: name and health never overlap`)
-      assert.ok(layout.imageY >= layout.nameBottom, `${width}: image follows on its own line`)
-    }
+    const serviceURL = page.url()
     await first.getByRole('button', { name: 'Edit agent-web-1 container icon', exact: true }).click()
     await page.getByRole('heading', { name: 'Edit agent-web-1 icon', exact: true }).waitFor()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-    assert.equal(await first.evaluate(element => element.open), false, 'Editing the icon never expands its card')
-    await row.focus()
+    assert.equal(page.url(), serviceURL, 'Editing the icon never navigates')
+    assert.equal(await page.locator('.container-inspection').count(), 0)
+    await first.locator('a.container-link').focus()
     await page.keyboard.press('Enter')
-    assert.equal(await first.locator('.container-inspection').isVisible(), true)
-    await first.locator('.inspection-line').filter({ hasText: 'Name' }).getByText('agent-web-1', { exact: true }).waitFor()
-    await first.locator('.inspection-line').getByText(image, { exact: true }).waitFor()
-    await page.keyboard.press('Space')
-    assert.equal(await first.evaluate(element => element.open), false)
+    const inspection = page.locator('.container-page .container-inspection')
+    await inspection.waitFor()
+    assert.equal(new URL(page.url()).hash, '#service/agent/agent-web-1')
+    await page.locator('.container-page').getByRole('heading', { level: 1, name: 'agent-web-1', exact: true }).waitFor()
+    for (const [label, value] of [['State', 'running'], ['Health check', 'healthy'], ['Restarts', '0'], ['Exit code', '0'], ['OOM killed', 'No']]) {
+      assert.equal(await inspection.getByText(label, { exact: true }).locator('..').locator('dd').innerText(), value)
+    }
+    assert.notEqual(await inspection.getByText('Started', { exact: true }).locator('..').locator('dd').innerText(), 'Not reported')
+    await inspection.getByText(image, { exact: true }).waitFor()
+    await inspection.getByRole('heading', { name: 'Health output', exact: true }).waitFor()
+    await inspection.getByText('Health check passed.', { exact: true }).waitFor()
+    assert.equal(await page.locator('.container-inspection').count(), 1)
+    await breadcrumb.getByRole('link', { name: 'agent', exact: true }).click()
+    await page.locator('.service-detail:not(.container-page)').getByRole('heading', { name: 'agent', level: 1, exact: true }).waitFor()
+    assert.equal(page.url(), serviceURL)
+    assert.equal(await page.locator('.container-inspection').count(), 0)
+    await cards.nth(1).locator('a.container-link').click()
+    assert.equal(new URL(page.url()).hash, '#service/agent/agent-web-2')
+    await page.locator('.container-page').getByRole('heading', { level: 1, name: 'agent-web-2', exact: true }).waitFor()
+    await inspection.getByText('tailscale/tailscale:latest', { exact: true }).waitFor()
+    await breadcrumb.getByRole('link', { name: 'agent', exact: true }).click()
+    await page.locator('.service-detail:not(.container-page)').getByRole('heading', { name: 'agent', level: 1, exact: true }).waitFor()
+    await breadcrumb.getByRole('link', { name: 'Monitor', exact: true }).click()
+    await agent.waitFor()
+    const monitorURL = page.url()
     await agent.getByRole('button', { name: 'Review 1 update', exact: true }).click()
     await page.locator('.update-dialog').waitFor()
+    assert.equal(page.url(), monitorURL, 'Review never navigates')
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     const missing = page.locator('.project-group').filter({ has: page.locator('.project-summary .identity-name', { hasText: 'missing-project' }) })
-    const missingCard = missing.locator('.container-detail')
+    await missing.locator('a.project-link').click()
+    const missingCard = page.locator('.container-row')
+    const missingURL = page.url()
     await missingCard.getByRole('button', { name: 'Resolve…', exact: true }).click()
     await page.locator('.resolution-dialog').waitFor()
-    assert.equal(await missingCard.evaluate(element => element.open), false)
+    assert.equal(page.url(), missingURL, 'Resolve never navigates')
+    assert.equal(await missingCard.locator('a.container-link button').count(), 0)
+    assert.equal(await page.locator('.container-inspection').count(), 0)
     await page.locator('.resolution-dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
+    await breadcrumb.getByRole('link', { name: 'Monitor', exact: true }).click()
     for (const project of await page.locator('.project-group').all()) {
-      if (!await project.evaluate(element => element.open)) await project.locator('.project-summary').click()
-    }
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth || document.documentElement.scrollHeight > innerHeight), false)
-    assert.equal(await page.locator('.app-content').evaluate(element => element.scrollWidth > element.clientWidth), false)
-    for (const summary of await page.locator('.container-summary').all()) {
-      assert.equal(await summary.evaluate(element => element.scrollWidth > element.clientWidth), false, `${width}: long names, status, resolution and images fit`)
+      await project.locator('a.project-link').click()
+      await page.locator('.service-detail').waitFor()
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${width}: service page fits the viewport`)
+      assert.equal(await page.locator('.app-content').evaluate(element => element.scrollWidth > element.clientWidth), false)
+      for (const summary of await page.locator('.container-summary').all()) {
+        assert.equal(await summary.evaluate(element => element.scrollWidth > element.clientWidth), false, `${width}: long names, status, resolution and images fit`)
+      }
+      await breadcrumb.getByRole('link', { name: 'Monitor', exact: true }).click()
     }
     if (screenshots && [1200, 390].includes(width)) {
       presentation = true
       await page.reload()
       await agent.waitFor()
-      await agent.locator('.project-summary').click()
+      await agent.locator('a.project-link').click()
+      await page.locator('.service-detail').waitFor()
       await page.screenshot({ path: join(screenshots, `container-cards-${width}.png`) })
     }
-    console.log(`PASS: ${width}px inset cards, container counts, diagnostics, icon editing, review/cancel, Resolve/cancel and overflow`)
+    console.log(`PASS: ${width}px compact service navigation, separate replica cards, runtime/health/image detail, breadcrumbs, independent icon/review/Resolve actions and overflow`)
     await context.close()
   }
   assert.deepEqual(errors, [])

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { authRequest } from './authApi.ts'
 import { AppShell } from './AppShell.tsx'
 import { PageHeader } from './PageHeader.tsx'
+import { Breadcrumb } from './Breadcrumb.tsx'
 import { WebAppUpdates } from './WebAppUpdates.tsx'
 import type { ApiKey, AuthUser } from './authApi.ts'
 
@@ -67,7 +68,7 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
     })
   }
   return <AppShell active="settings" user={user} onMonitor={onBack} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
-    <main className="workspace accounts-workspace"><PageHeader title="Settings" actions={section !== 'Updates' && <button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button>} />
+    <main className="workspace accounts-workspace"><Breadcrumb root="Settings" /><PageHeader title="Settings" actions={section !== 'Updates' && <button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button>} />
     {error && <p role="alert" className="notice danger">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
     <nav className="account-sections" aria-label="Settings sections">{['Updates', 'Administrators', 'API keys', 'Password'].map(name => <button type="button" key={name} aria-pressed={section === name} disabled={busy} onClick={() => setSection(name)}>{name}</button>)}</nav>
     <WebAppUpdates hidden={section !== 'Updates'} disabled={busy} />

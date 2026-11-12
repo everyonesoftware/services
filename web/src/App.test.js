@@ -10,17 +10,75 @@ after(() => server.close())
 const components = await server.ssrLoadModule('/src/App.tsx')
 const fixture = { name: 'site', status: 'unhealthy', containers: [{ id: 'web', name: 'site-web-1', project: 'site', service: 'web', image: 'nginx:stable', state: 'running', health: 'unhealthy', monitorStatus: 'unhealthy', monitorReason: 'Probe failed', restartCount: 4, healthOutput: 'Connection refused <script>', updateAvailable: true, currentDigest: 'sha256:old', proposedDigest: 'sha256:new' }] }
 
+test('project list is a compact linked article with no container inspection or disclosure', () => {
+  const project = { ...fixture, name: 'site / #preview & tools' }
+  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() {}, actionsDisabled: false }))
+  assert.match(html, /<article class="project-group(?: [^"]*)?"/)
+  assert.match(html, /<div class="group-summary project-summary">/)
+  const link = html.match(/<a\b[^>]*class="project-link"[^>]*>/)?.[0]
+  assert.ok(link, 'the service identity is a real link')
+  assert.ok(link.includes(`href="#service/${encodeURIComponent(project.name)}"`))
+  assert.doesNotMatch(html, /<details|<summary|container-row|container-summary|container-link|site-web-1|Health output|Connection refused|Restarts|nginx:stable/)
+})
+
+test('service container cards link actual names and keep icon editing outside navigation links', () => {
+  const project = { ...fixture, containers: [fixture.containers[0], { ...fixture.containers[0], id: 'replica', name: 'site-web-2' }] }
+  const html = renderToStaticMarkup(createElement(components.ServiceDetail, { project, onReview() {}, actionsDisabled: false, iconsAvailable: true, onEditIcon() {} }))
+  assert.equal((html.match(/class="container-row"/g) || []).length, 2)
+  assert.equal((html.match(/<div class="container-summary">/g) || []).length, 2)
+  const links = [...html.matchAll(/<a\b[^>]*class="container-link"[^>]*>([\s\S]*?)<\/a>/g)]
+  assert.equal(links.length, 2)
+  for (const [index, link] of links.entries()) {
+    assert.ok(link[0].includes('href="#service/site/'))
+    assert.ok(link[1].includes(project.containers[index].name))
+    assert.doesNotMatch(link[0], /<button|icon-button/)
+  }
+  assert.equal((html.match(/class="icon-button"/g) || []).length, 3)
+  assert.doesNotMatch(html, /<details|<summary|Health output|Connection refused|Restarts|compose\.ya?ml|\/opt\//)
+})
+
+test('detail pages show only project-scoped events and link back to their real parents', () => {
+  const event = { id: 'selected', project: 'site', name: 'site-web-1', kind: 'unhealthy', message: 'Selected <script>event</script>', time: '2026-11-09T12:34:56Z' }
+  const events = [event, { ...event, id: 'other', project: 'other', message: 'Foreign-project-event' }, { ...event, id: 'engine', project: '', message: 'Global-engine-event' }]
+  for (const Component of [components.ServiceDetail, components.ContainerDetail]) {
+    const html = renderToStaticMarkup(createElement(Component, { project: fixture, container: fixture.containers[0], onReview() {}, actionsDisabled: false, events, eventsLoading: false, eventsError: '' }))
+    if (Component === components.ServiceDetail) assert.match(html, /Selected &lt;script&gt;event&lt;\/script&gt;/)
+    assert.doesNotMatch(html, /Foreign-project-event|Global-engine-event|<script>/)
+    assert.match(html, /<a[^>]*href="#monitor"[^>]*>[^<]+<\/a>/)
+    if (Component === components.ContainerDetail) assert.match(html, /<a[^>]*href="#service\/site"[^>]*>site<\/a>/)
+  }
+})
+
+test('container detail has one editable container icon and adds only real sibling icons', () => {
+  const props = { project: fixture, container: fixture.containers[0], onReview() {}, actionsDisabled: false, iconsAvailable: true, onEditIcon() {} }
+  const html = renderToStaticMarkup(createElement(components.ContainerDetail, props))
+  assert.equal((html.match(/class="service-icon/g) || []).length, 1)
+  assert.match(html, /aria-label="Edit site-web-1 container icon"/)
+  assert.doesNotMatch(html, /Edit site project icon/)
+  const sibling = { ...fixture.containers[0], id: 'db', name: 'site-db-1', service: 'db', image: 'postgres:17' }
+  const multiple = renderToStaticMarkup(createElement(components.ContainerDetail, { ...props, project: { ...fixture, containers: [...fixture.containers, sibling] } }))
+  assert.equal((multiple.match(/class="service-icon/g) || []).length, 2)
+  assert.match(multiple, /site-db-1/)
+  const siblingLink = multiple.match(/<a\b[^>]*class="container-link"[^>]*>([\s\S]*?)<\/a>/)?.[0]
+  assert.ok(siblingLink)
+  assert.doesNotMatch(siblingLink, /<button/)
+})
+
 test('missing container rows expose one optional Resolve callback without replacing icons or update review', () => {
   const missing = { ...fixture, containers: [{ ...fixture.containers[0], monitorStatus: 'missing', state: 'missing', monitorSnoozedUntil: '2099-01-01T00:00:00Z' }] }
-  const props = { project: missing, onReview() {}, actionsDisabled: false, onResolve() {} }
-  const html = renderToStaticMarkup(createElement(components.ProjectGroup, props))
-  assert.match(html, /Resolve…/)
-  assert.match(html, /Missing · Snoozed/)
-  assert.match(html, /Review 1 update/)
-  assert.match(html, /class="service-icon/)
-  assert.doesNotMatch(html, /Investigate/)
-  const absent = renderToStaticMarkup(createElement(components.ProjectGroup, { ...props, onResolve: undefined }))
-  assert.doesNotMatch(absent, /Resolve…/)
+  const props = { project: missing, container: missing.containers[0], onReview() {}, actionsDisabled: false, onResolve() {} }
+  for (const Component of [components.ServiceDetail, components.ContainerDetail]) {
+    const html = renderToStaticMarkup(createElement(Component, props))
+    assert.equal((html.match(/>Resolve…</g) || []).length, 1)
+    assert.match(html, /Missing · Snoozed/)
+    assert.match(html, /Review 1 update/)
+    assert.match(html, /class="service-icon/)
+    assert.doesNotMatch(html, /Investigate/)
+    const absent = renderToStaticMarkup(createElement(Component, { ...props, onResolve: undefined }))
+    assert.doesNotMatch(absent, /Resolve…/)
+    const disabled = renderToStaticMarkup(createElement(Component, { ...props, resolveDisabled: true }))
+    assert.match(disabled, /<button[^>]*disabled=""[^>]*>Resolve…<\/button>/)
+  }
 })
 
 test('project and container icons share a light gray circular background without cropping artwork', () => {
@@ -30,7 +88,7 @@ test('project and container icons share a light gray circular background without
   assert.match(iconStyle, /border-radius:\s*50%\s*;/)
   assert.match(iconStyle, /object-fit:\s*contain\s*;/)
   assert.match(iconStyle, /padding:\s*3px\s*;/)
-  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: fixture, onReview() {}, actionsDisabled: false }))
+  const html = renderToStaticMarkup(createElement(components.ServiceDetail, { project: fixture, onReview() {}, actionsDisabled: false }))
   assert.equal((html.match(/class="service-icon/g) || []).length, 2)
   assert.equal((html.match(/<img /g) || []).length, 2)
 })
@@ -41,14 +99,14 @@ test('icon editing uses independent project and stable container-name overrides 
     { kind: 'container', key: 'site-web-1', url: '/api/icons/images/container.png', sourceUrl: 'https://example.com/c.png' },
     { kind: 'container', key: 'web', url: '/api/icons/images/wrong-id.png', sourceUrl: 'https://example.com/wrong.png' },
   ] }
-  const html = renderToStaticMarkup(createElement(components.ProjectGroup, props))
+  const html = renderToStaticMarkup(createElement(components.ServiceDetail, props))
   assert.match(html, /src="\/api\/icons\/images\/project.png"/)
   assert.match(html, /src="\/api\/icons\/images\/container.png"/)
   assert.doesNotMatch(html, /wrong-id|https:\/\/example.com/)
   assert.match(html, /<button[^>]*class="icon-button"[^>]*aria-label="Edit site project icon"/)
   assert.match(html, /aria-label="Edit site-web-1 container icon"/)
   assert.equal((html.match(/class="icon-button"/g) || []).length, 2)
-  const unavailable = renderToStaticMarkup(createElement(components.ProjectGroup, { ...props, iconsAvailable: false }))
+  const unavailable = renderToStaticMarkup(createElement(components.ServiceDetail, { ...props, iconsAvailable: false }))
   assert.doesNotMatch(unavailable, /class="icon-button"/)
   assert.match(unavailable, /site-web-1/)
 })
@@ -61,17 +119,19 @@ test('pencil is hidden except on the icon button hover or keyboard focus, and di
   assert.match(css, /\.icon-dialog\s*\{[^}]*max-width:\s*460px/)
 })
 
-test('expandable groups expose reasons, health output and restart details; updates use a group review action', () => {
-  assert.equal(typeof components.ProjectGroup, 'function')
-  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: fixture, onReview: () => {}, actionsDisabled: false }))
-  assert.match(html, /<details[^>]*open=""/)
+test('container page exposes runtime reasons, escaped health output, image and restarts without expanders', () => {
+  assert.equal(typeof components.ContainerDetail, 'function')
+  const html = renderToStaticMarkup(createElement(components.ContainerDetail, { project: fixture, container: fixture.containers[0], onReview: () => {}, actionsDisabled: false }))
+  assert.doesNotMatch(html, /<details|<summary|<script>/)
   assert.match(html, /Probe failed/)
   assert.match(html, /Connection refused &lt;script&gt;/)
   assert.match(html, /Restarts/)
   assert.match(html, />4</)
   assert.match(html, /Review 1 update/)
   assert.match(html, /Health output/)
-  const standalone = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, name: 'Standalone' }, onReview: () => {}, actionsDisabled: false }))
+  assert.match(html, /nginx:stable/)
+  assert.match(html, /site-web-1/)
+  const standalone = renderToStaticMarkup(createElement(components.ServiceDetail, { project: { ...fixture, name: 'Standalone' }, onReview: () => {}, actionsDisabled: false }))
   assert.match(standalone, /disabled=""/)
   assert.match(standalone, /Compose configuration/)
 })
@@ -102,11 +162,13 @@ const publication = {
 const publicationProject = (value) => ({ ...fixture, containers: [{ ...fixture.containers[0], updatePublication: value }] })
 
 test('refreshing project labels reconciliation and hides stale publication details and actions', () => {
-  const project = { ...publicationProject(publication), updateState: 'refreshing' }
-  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() {}, actionsDisabled: false }))
-  assert.match(html, />Refreshing</)
-  assert.doesNotMatch(html, />Updating<|Review 1 update|Publish notification|v2\.1|Workflow run/)
-  assert.match(html, /Health output/)
+  const project = { ...publicationProject(publication), updateState: 'refreshing', containers: [{ ...publicationProject(publication).containers[0], updateStatus: 'stale-image-status', updateError: 'stale-image-error', updateCheckedAt: '2026-10-01T01:02:03Z' }] }
+  for (const Component of [components.ProjectGroup, components.ServiceDetail, components.ContainerDetail]) {
+    const html = renderToStaticMarkup(createElement(Component, { project, container: project.containers[0], onReview() {}, actionsDisabled: false }))
+    assert.match(html, />Refreshing</)
+    assert.doesNotMatch(html, />Updating<|Review 1 update|Publish notification|v2\.1|Workflow run|sha256:new|stale-image-status|stale-image-error/)
+    if (Component === components.ContainerDetail) assert.match(html, /Health output/)
+  }
 })
 const reviewMarkup = (project) => renderToStaticMarkup(createElement(components.UpdateDialog, { project, onClose() {}, onUpdated() {} }))
 
@@ -146,6 +208,18 @@ test('publication links reject untrusted GitHub URLs and escape injected display
   assert.doesNotMatch(reviewMarkup(publicationProject({ ...publication, commit: 'not-a-sha<script>' })), /<a[^>]*\/commit\//)
 })
 
+test('container publication inspection preserves safe external links and escapes untrusted metadata', () => {
+  const render = (value) => {
+    const project = publicationProject(value)
+    return renderToStaticMarkup(createElement(components.ContainerDetail, { project, container: project.containers[0], onReview() {}, actionsDisabled: false }))
+  }
+  const safe = render(publication)
+  assert.match(safe, /href="https:\/\/github.com\/acme\/site\/actions\/runs\/12345"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/)
+  const unsafe = render({ ...publication, runUrl: 'javascript:alert(1)', version: '<script>unsafe-version</script>' })
+  assert.match(unsafe, /&lt;script&gt;unsafe-version&lt;\/script&gt;/)
+  assert.doesNotMatch(unsafe, /href="javascript:|<script>|<a[^>]*>Workflow run/)
+})
+
 test('missing, partial and unsupported publication data keep manual digest review usable', () => {
   for (const value of [undefined, null, {}, { schemaVersion: 99 }, { ...publication, schemaVersion: 2 }, 'unexpected']) {
     const html = reviewMarkup(publicationProject(value))
@@ -171,7 +245,7 @@ test('replicas share one publication detail without leaking another service or s
   assert.match(html, /2 replicas/)
 })
 
-test('publication details stay in expanded container inspection and leave manual actions unchanged', () => {
+test('publication details stay on container pages and leave manual actions unchanged', () => {
   const requests = []
   let reviewed = 0
   let updated = 0
@@ -179,18 +253,23 @@ test('publication details stay in expanded container inspection and leave manual
   globalThis.fetch = (...args) => { requests.push(args); throw new Error('Rendering must not submit an update') }
   try {
     const project = publicationProject(publication)
-    const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() { reviewed++ }, actionsDisabled: false }))
-    const summary = html.match(/<summary class="container-summary">([\s\S]*?)<\/summary>/)[1]
+    const html = renderToStaticMarkup(createElement(components.ServiceDetail, { project, onReview() { reviewed++ }, actionsDisabled: false }))
+    const summary = html.match(/<div class="container-summary">([\s\S]*)/)[1]
     assert.doesNotMatch(summary, /Publish notification|v2\.1|Workflow run/)
-    assert.match(html, /Publish notification/)
+    assert.doesNotMatch(html, /Publish notification|Workflow run/)
+    const inspection = renderToStaticMarkup(createElement(components.ContainerDetail, { project, container: project.containers[0], onReview() { reviewed++ }, actionsDisabled: false }))
+    assert.match(inspection, /Publish notification/)
+    assert.match(inspection, /v2\.1/)
+    assert.match(inspection, /Workflow run/)
+    assert.doesNotMatch(inspection, /<details|<summary/)
     assert.match(html, /Review 1 update/)
     const dialog = renderToStaticMarkup(createElement(components.UpdateDialog, { project, onClose() {}, onUpdated() { updated++ } }))
     assert.deepEqual([...dialog.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map(match => match[1]), ['Cancel', 'Confirm &amp; update'])
     assert.equal(reviewed, 0)
     assert.equal(updated, 0)
     assert.deepEqual(requests, [])
-    assert.doesNotMatch(html + dialog, /auto.?update|automatically (update|install)|registry check/i)
-    const fallback = renderToStaticMarkup(createElement(components.ProjectGroup, { project: fixture, onReview() {}, actionsDisabled: false }))
+    assert.doesNotMatch(html + inspection + dialog, /auto.?update|automatically (update|install)|registry check/i)
+    const fallback = renderToStaticMarkup(createElement(components.ContainerDetail, { project: fixture, container: fixture.containers[0], onReview() {}, actionsDisabled: false }))
     assert.doesNotMatch(fallback, /Publish notification/)
   } finally { globalThis.fetch = originalFetch }
 })
@@ -276,11 +355,11 @@ test('Docker activity keeps explanatory copy collapsed without hiding live state
   assert.ok(html.indexOf('No Compose work running or queued.') < html.indexOf('activity-help'))
 })
 
-test('project summaries count containers, including replicas, without repeating the count in expanded content', () => {
+test('compact project summaries count actual containers, including replicas, without expanded content', () => {
   for (const count of [0, 1, 2]) {
     const project = { ...fixture, containers: Array.from({ length: count }, (_, index) => ({ ...fixture.containers[0], id: `web-${index}`, name: `site-web-${index}` })) }
     const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() {}, actionsDisabled: false }))
-    const summary = html.match(/<summary class="group-summary project-summary">([\s\S]*?)<\/summary>/)[1]
+    const summary = html.match(/<div class="group-summary project-summary">([\s\S]*?)<\/div>/)[1]
     assert.match(summary, new RegExp(`class="project-summary-counts">${count} ${count === 1 ? 'container' : 'containers'}<`))
     assert.doesNotMatch(summary, />\d+ services?\b|project-container-count/)
     assert.doesNotMatch(html, /project-expanded-facts|containers? in this project/)
@@ -288,22 +367,26 @@ test('project summaries count containers, including replicas, without repeating 
 })
 
 test('healthy rows avoid redundant health prose and duplicate container names', () => {
-  const container = { ...fixture.containers[0], name: 'web', health: 'healthy', monitorStatus: 'healthy', monitorReason: 'Health check passing', updateAvailable: false }
-  const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { name: 'site', containers: [container] }, onReview: () => {}, actionsDisabled: false }))
-  const summary = html.match(/<summary class="container-summary">([\s\S]*?)<\/summary>/)[1]
+  const container = { ...fixture.containers[0], health: 'healthy', monitorStatus: 'healthy', monitorReason: 'Health check passing', updateAvailable: false }
+  const html = renderToStaticMarkup(createElement(components.ServiceDetail, { project: { name: 'site', containers: [container] }, onReview: () => {}, actionsDisabled: false }))
+  const summary = html.match(/<div class="container-summary">([\s\S]*)/)[1]
   assert.doesNotMatch(summary, /Health check passing/)
-  assert.equal((summary.match(/>web</g) || []).length, 1)
+  assert.equal((summary.match(/>site-web-1</g) || []).length, 1)
   assert.match(summary, /nginx:stable/)
   assert.match(summary, /Healthy/)
 })
 
 test('project and container names have bundled decorative brand images and unknowns have neutral icons', () => {
   const container = { ...fixture.containers[0], image: 'tailscale/tailscale:stable', service: 'vpn' }
-  const render = (image) => renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, name: 'my-vpn', containers: [{ ...container, image }] }, onReview() {}, actionsDisabled: false }))
+  const render = (image) => renderToStaticMarkup(createElement(components.ServiceDetail, { project: { ...fixture, name: 'my-vpn', containers: [{ ...container, image }] }, onReview() {}, actionsDisabled: false }))
   const html = render(container.image)
   assert.equal((html.match(/data-brand="tailscale"/g) || []).length, 2)
-  for (const name of ['my-vpn', 'vpn']) {
-    assert.match(html, new RegExp(`class="identity-name"><img[^>]*aria-hidden="true"[^>]*><span>${name}</span>`))
+  for (const name of ['my-vpn', 'site-web-1']) assert.ok(html.includes(`>${name}<`))
+  const images = [...html.matchAll(/<img\b[^>]*>/g)].map(match => match[0])
+  assert.equal(images.length, 2)
+  for (const image of images) {
+    assert.match(image, /aria-hidden="true"/)
+    assert.match(image, /alt=""/)
   }
   assert.equal((html.match(/src="\/icons\/tailscale.png"/g) || []).length, 2)
   assert.equal((html.match(/alt=""/g) || []).length, 2)
@@ -316,7 +399,7 @@ test('project and container names have bundled decorative brand images and unkno
 
 test('image artwork is contained and neutral SVG viewports retain breathing room', () => {
   for (const image of ['tailscale/tailscale:stable', 'lscr.io/linuxserver/qbittorrent:latest', 'custom/unknown:latest']) {
-    const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { ...fixture, containers: [{ ...fixture.containers[0], image }] }, onReview() {}, actionsDisabled: false }))
+    const html = renderToStaticMarkup(createElement(components.ServiceDetail, { project: { ...fixture, containers: [{ ...fixture.containers[0], image }] }, onReview() {}, actionsDisabled: false }))
     const icons = [...html.matchAll(/<svg class="service-icon[^>]*viewBox="([^"]+)"/g)]
     assert.equal(icons.length, image === 'custom/unknown:latest' ? 2 : 0)
     for (const [, viewBox] of icons) {

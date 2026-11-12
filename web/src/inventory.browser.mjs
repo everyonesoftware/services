@@ -16,8 +16,13 @@ const pending = []
 const project = version => ({ name: 'site', status: 'healthy', containers: [{ id: 'web', name: 'site-web-1', project: 'site', service: 'web', image: 'nginx:stable', state: 'running', health: 'healthy', updateAvailable: !!version, updateStatus: version ? `Available ${version}` : 'Current', updatePublication: version ? { schemaVersion: 1, version, publishedAt: '2026-11-09T12:34:56Z' } : undefined }] })
 const fulfill = (route, version) => route.fulfill({ json: { projects: [project(version)] } }).catch(() => {})
 const wait = async predicate => { for (let i = 0; i < 200; i++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 20)) } throw new Error('Timed out waiting for assertion') }
-const refresh = () => page.getByRole('button', { name: /^↻ Refresh$/ }).click()
-const updates = () => page.getByRole('button', { name: /^Updates/ }).textContent()
+const refresh = () => page.getByRole('button', { name: 'Refresh', exact: true }).click()
+const updates = async () => {
+  await page.getByRole('button', { name: /^Service filter:/ }).click()
+  const text = await page.getByRole('menuitemradio', { name: /^Updates/ }).textContent()
+  await page.keyboard.press('Escape')
+  return text.replace(/[\s()]/g, '')
+}
 await page.route('**/api/**', async route => {
   const path = new URL(route.request().url()).pathname
   if (path === '/api/auth/status') return route.fulfill({ json: { setupRequired: false } })
@@ -35,14 +40,17 @@ try {
     hold = false; pending.length = 0
     operations = []
     await page.goto(server.resolvedUrls.local[0])
-    await page.locator('.group-summary').click()
+    await page.locator('article.project-group > div.group-summary.project-summary').waitFor()
+    const monitorURL = page.url()
+    assert.equal(await page.locator('.project-group .container-row, .project-group details').count(), 0)
     await page.getByRole('button', { name: /Review 1 update/ }).click()
     assert.match(await page.locator('.update-dialog').textContent(), /v2-stale/)
+    assert.equal(page.url(), monitorURL, 'Review does not navigate')
     assert.equal(await page.getByRole('button', { name: 'Confirm & update', exact: true }).isEnabled(), true)
     hold = true
     // Start inventory before the terminal observation, then keep both reads pending.
     // Dispatch the normal Refresh action behind the modal without dismissing review.
-    await page.getByRole('button', { name: /^↻ Refresh$/ }).evaluate(button => button.click())
+    await page.getByRole('button', { name: 'Refresh', exact: true }).evaluate(button => button.click())
     await wait(() => pending.length >= 1)
     operations = [{ id: `operation-${observedState}`, project: 'site', action: 'update', state: observedState, queuedAt: new Date().toISOString(), messages: [] }]
     if (observedState === 'queued' || observedState === 'running') {
@@ -59,11 +67,11 @@ try {
     assert.equal(await page.locator('.update-dialog').count(), 0, 'terminal observation must invalidate the stale modal while inventory is pending')
     assert.equal(await page.getByRole('button', { name: /^Confirm &/ }).count(), 0)
     assert.equal(await updates(), 'Updates0')
-    assert.equal(await page.locator('.group-update, .publication-details').count(), 0)
+    assert.equal(await page.locator('.project-update, .publication-details').count(), 0)
     await fulfill(pending.shift(), 'v2-stale')
     assert.equal(await updates(), 'Updates0', 'pre-observation response cannot release the gate')
     await pending.shift().fulfill({ status: 503, body: 'Inventory fixture unavailable' }).catch(() => {})
-    await page.getByText('Inventory fixture unavailable', { exact: true }).waitFor()
+    await page.getByRole('alert').filter({ hasText: 'Inventory fixture unavailable' }).waitFor()
     assert.equal(await updates(), 'Updates0')
     await page.locator('.group-signals').getByText('Refreshing', { exact: true }).waitFor()
     assert.equal(await page.locator('.update-dialog, .publication-details').count(), 0, 'failed inventory cannot restore stale review metadata')
@@ -72,17 +80,23 @@ try {
     await wait(() => pending.length >= 1)
     await fulfill(pending.shift(), 'v3-genuinely-newer')
     await wait(() => updates().then(text => text === 'Updates1'))
-    if (!await page.locator('.project-group').evaluate(node => node.open)) await page.locator('.group-summary').click()
+    assert.equal(page.url(), monitorURL, 'Inventory reconciliation does not navigate')
     await page.getByRole('button', { name: /Review 1 update/ }).waitFor()
     assert.equal(await page.getByRole('button', { name: /Review 1 update/ }).isEnabled(), true)
-    assert.match(await page.locator('.publication-details').textContent(), /v3-genuinely-newer/)
     assert.equal(await page.locator('.update-dialog').count(), 0, 'fresh inventory must not silently reopen or replace the approved target')
     await page.getByRole('button', { name: /Review 1 update/ }).click()
     assert.match(await page.locator('.update-dialog').textContent(), /v3-genuinely-newer/)
     assert.doesNotMatch(await page.locator('.update-dialog').textContent(), /v2-stale/)
     assert.equal(await page.getByRole('button', { name: 'Confirm & update', exact: true }).isEnabled(), true)
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-    assert.equal(await page.getByText('Inventory fixture unavailable', { exact: true }).count(), 0)
+    assert.equal(page.url(), monitorURL)
+    await page.locator('a.project-link').click()
+    await page.locator('.service-detail').getByRole('heading', { level: 1, name: 'site', exact: true }).waitFor()
+    assert.equal(await page.locator('.container-inspection').count(), 0)
+    await page.locator('a.container-link').click()
+    assert.equal(new URL(page.url()).hash, '#service/site/site-web-1')
+    assert.match(await page.locator('.container-page .container-inspection .publication-details').textContent(), /v3-genuinely-newer/)
+    assert.equal(await page.getByRole('alert').filter({ hasText: 'Inventory fixture unavailable' }).count(), 0)
     await page.setViewportSize({ width: 390, height: 800 })
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     await page.setViewportSize({ width: 1200, height: 900 })

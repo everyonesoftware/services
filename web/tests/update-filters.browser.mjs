@@ -38,7 +38,6 @@ await page.route('**/api/**', async route => {
 try {
   await page.goto(server.resolvedUrls.local[0])
   await chooseFilter('Updates')
-  await page.locator('.group-summary').click()
   await page.getByRole('button', { name: /Review 1 update/ }).click()
   await page.getByRole('button', { name: 'Confirm & update', exact: true }).click()
   await page.locator('.update-dialog').waitFor({ state: 'detached' })
@@ -64,7 +63,6 @@ try {
   await refresh()
   await wait(() => filter('Updates').textContent().then(text => /Updates \(1\)/.test(text)))
   await chooseFilter('Updates')
-  await page.locator('.group-summary').click()
   assert.equal(await page.getByRole('button', { name: /Review 1 update/ }).isEnabled(), true)
   rejectUpdate = true
   await page.getByRole('button', { name: /Review 1 update/ }).click()
