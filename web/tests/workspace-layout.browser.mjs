@@ -43,7 +43,7 @@ async function exercise(viewport) {
     return Object.hasOwn(fixtures, path) ? route.fulfill({ json: fixtures[path] }) : route.fulfill({ status: 404 })
   })
   const go = async index => {
-    await page.locator('.app-sidebar').getByRole('link', { name: labels[index], exact: true }).click()
+    await page.locator(viewport.width <= 640 ? '.mobile-navigation' : '.app-sidebar').getByRole('link', { name: labels[index], exact: true }).click()
     await page.getByRole('heading', { level: 1, name: titles[index], exact: true }).waitFor()
     await page.locator('.app-content').evaluate(element => { element.scrollTop = 0 })
   }
@@ -76,7 +76,8 @@ async function exercise(viewport) {
       assert.ok(moving.y < baseline.y, 'Toolbar scrolls before reaching top')
       await page.locator('.app-content').evaluate(element => { element.scrollTop = 500 })
       const first = await page.evaluate(() => ({ panel: document.querySelector('.sticky-panel').getBoundingClientRect().top, row: document.querySelector('.project-group,.activity-feed > li').getBoundingClientRect().top, sidebar: document.querySelector('.app-sidebar').getBoundingClientRect().top }))
-      await page.mouse.move(viewport.width - 50, viewport.height - 60)
+      const contentBox = await page.locator('.app-content').boundingBox()
+      await page.mouse.move(viewport.width - 50, contentBox.y + contentBox.height - 20)
       await page.mouse.wheel(0, 200)
       await wait(async () => await page.locator('.app-content').evaluate(element => element.scrollTop > 550))
       const later = await page.evaluate(() => ({ panel: document.querySelector('.sticky-panel').getBoundingClientRect().top, row: document.querySelector('.project-group,.activity-feed > li').getBoundingClientRect().top, sidebar: document.querySelector('.app-sidebar').getBoundingClientRect().top }))

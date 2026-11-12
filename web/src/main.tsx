@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import { AuthGate } from './AuthGate.tsx'
 import { registerPwa } from './registerPwa.ts'
+import './Mobile.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

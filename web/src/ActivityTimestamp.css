@@ -2,7 +2,8 @@
 .activity-date { font-size: 9px; }
 .activity-time-separator { display: none; }
 @media (max-width: 640px) {
-  .activity-timestamp { flex-direction: row; align-items: baseline; gap: 0; }
+  .activity-timestamp,
+  .activity-feed .operation-time .activity-timestamp { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 0; font-size: 14px; line-height: 1.5; }
   .activity-date { font-size: inherit; }
   .activity-time-separator { display: inline; white-space: pre; }
 }

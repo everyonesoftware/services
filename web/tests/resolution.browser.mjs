@@ -81,6 +81,11 @@ const bulk = () => page.getByRole('button', { name: /^Resolve (both|all) missing
 const refresh = async () => { const before = monitorReads; await page.getByRole('button', { name: /Refresh/ }).click(); await wait(() => monitorReads > before) }
 const undo = async () => { await page.getByRole('button', { name: 'Undo', exact: true }).click(); await wait(() => page.locator('.incident').count().then(n => n === 2)) }
 const fit = async label => {
+  if ((await page.viewportSize()).width <= 640) {
+    assert.ok(await dialog.locator('.resolution-context').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize)) >= 16, 'Resolution body matches mobile body typography')
+    assert.ok(await dialog.locator('.resolution-decision label').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize)) >= 16, 'Resolution controls retain readable labels')
+    assert.ok(await dialog.locator('select').first().evaluate(el => el.getBoundingClientRect().height) >= 48)
+  }
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${label}: document horizontal fit`)
   assert.ok(await page.locator('.app-content').evaluate(el => el.scrollWidth <= el.clientWidth), `${label}: dashboard behind modal fits horizontally`)
   assert.ok(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth), `${label}: dialog horizontal fit`)

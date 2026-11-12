@@ -1,0 +1,84 @@
+/* Shared mobile vocabulary. Component layouts remain in their own stylesheets. */
+.mobile-navigation, .mobile-account, .monitor-check-icon { display: none; }
+
+@media (max-width: 640px) {
+  body { min-width: 0; }
+  .auth-shell { font-size: 16px; }
+  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; font-size: 16px; }
+  .app-shell > .app-sidebar { display: none; }
+  .app-shell > .app-content { grid-column: 1; grid-row: 1; scrollbar-gutter: auto; }
+  .app-content > .workspace { padding: 16px 16px 24px; }
+  .app-content > .session-notice { top: 8px; margin: 8px 16px; z-index: 4; }
+  .mobile-navigation { grid-column: 1; grid-row: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; min-height: calc(68px + env(safe-area-inset-bottom, 0px)); padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); background: #1d302b; color: #cedbd1; border-top: 1px solid #354c40; }
+  .mobile-navigation a { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-width: 0; min-height: 59px; padding: 5px 0; border-radius: 6px; font-size: 12px; line-height: 16px; color: inherit; text-decoration: none; }
+  .mobile-navigation .sidebar-icon { width: 22px; height: 22px; }
+  .mobile-navigation .sidebar-label { display: block; }
+  .mobile-navigation .sidebar-arrow { display: none; }
+  .mobile-navigation a[aria-current="page"] { background: #304c42; color: #fff; font-weight: 600; }
+  .mobile-navigation a[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .mobile-navigation a:focus-visible { outline-color: #b6dbbf; outline-offset: -3px; }
+  .button { font-size: 16px; line-height: 1.4; min-height: 48px; white-space: normal; text-align: center; }
+  .app-content .page-heading.unified-page-header { gap: 12px; margin-bottom: 12px; }
+  .app-content .page-heading.unified-page-header h1 { min-height: 48px; }
+  .app-content .page-heading.unified-page-header .heading-actions { flex-basis: auto; width: auto; min-width: 0; flex-wrap: wrap; }
+  .monitor-header-action { min-width: 48px; padding: 10px; }
+  .monitor-header-action > span[aria-hidden="true"] { font-size: 23px; line-height: 1; }
+  .monitor-action-label { display: none; }
+  .monitor-check-icon { display: block; width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .sticky-panel { padding: 4px 0 12px; }
+  .activity-filters { padding: 0; border: 0; background: transparent; gap: 8px; }
+  .activity-search { min-height: 48px; background: #fff; }
+  .activity-search input { font-size: 16px; line-height: 24px; padding: 10px 0; }
+  .activity-search button { min-width: 40px; min-height: 48px; }
+  .activity-icon-dropdown { min-width: 48px; min-height: 48px; }
+  .activity-menu-option { min-height: 48px; font-size: 16px; }
+  .activity-menu-title { font-size: 12px; }
+  #services .activity-filters { flex-wrap: nowrap; }
+  #services .activity-search { flex-basis: auto; }
+  #services .activity-icon-group { width: auto; }
+  #services .activity-icon-dropdown { flex: none; }
+  .app-content h2, .auth-card h2 { font-size: 20px; line-height: 1.35; }
+  .app-content h3, .auth-card h3 { font-size: 18px; line-height: 1.4; }
+  .auth-form label, .key-reveal label, .auth-form legend { font-size: 16px; }
+  .icon-url, .icon-file, .auth-form input:not([type="checkbox"]):not([type="radio"]), .auth-form textarea, .auth-form select { min-width: 0; max-width: 100%; font-size: 16px; min-height: 48px; }
+  .auth-help, .icon-help, .icon-storage { font-size: 14px; line-height: 1.6; }
+  .notice, .activity-scope, .queue-explanation { font-size: 14px; line-height: 1.6; }
+  .account-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+  .account-sections button { min-height: 48px; font-size: 16px; text-align: left; }
+  .auth-form .auth-checkbox { min-height: 48px; }
+  .auth-list { margin-top: 12px; }
+  .auth-list li { flex-wrap: wrap; gap: 10px; }
+  .auth-list li > div { flex: 1 1 160px; }
+  .auth-list strong { font-size: 18px; }
+  .auth-list code, .key-reveal label { font-size: 14px; }
+  .mobile-account { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--border); margin-top: 24px; padding-top: 18px; }
+  .mobile-account > div { min-width: 0; display: grid; gap: 3px; overflow-wrap: anywhere; }
+  .mobile-account span { font-size: 14px; color: var(--muted); }
+  .mobile-account strong { font-size: 16px; }
+  .empty-state h3 { font-size: 18px; }
+  .empty-state p { font-size: 16px; }
+  .section-title h2 { font-size: 18px; }
+  .section-note, .count { font-size: 14px; }
+  .incident h3 { font-size: 18px; }
+  .incident p, .incident time { font-size: 14px; }
+  .status-badge { font-size: 14px; }
+  .publication-facts dt, .container-facts dt { font-size: 14px; }
+  .publication-facts dd, .container-facts dd { font-size: 16px; }
+  .icon-dialog .dialog-header h2 { font-size: 24px; }
+  .icon-dialog .dialog-header > p { font-size: 16px; }
+  .icon-field-label, .icon-preview strong { font-size: 16px; }
+  .icon-error { font-size: 14px; }
+  .icon-dialog .icon-reset { min-height: 48px; font-size: 16px; }
+  .webapp-version-details dt, .webapp-update-help, .webapp-update-error { font-size: 14px; line-height: 1.6; }
+  .webapp-version-details dd { font-size: 16px; }
+  .webapp-reload-dialog h2 { font-size: 24px; }
+  .webapp-reload-body { font-size: 16px; line-height: 1.5; }
+  .resolution-dialog .dialog-header h2 { font-size: 24px; }
+  .resolution-dialog .dialog-header > p, .resolution-context, .resolution-bulk, .resolution-decision label { font-size: 16px; line-height: 1.5; }
+  .resolution-dialog select, .resolution-context summary { min-height: 48px; font-size: 16px; }
+  .resolution-entry-head h3 { font-size: 18px; }
+  .resolution-entry-head small, .resolution-facts dt, .resolution-facts code, .resolution-context details, .resolution-events time, .resolution-decision p, .resolution-scope, .resolution-dialog .resolution-error, .resolution-selection { font-size: 14px; line-height: 1.5; }
+  .resolution-dialog .dialog-actions { gap: 8px; }
+  .resolution-dialog .dialog-actions .button { flex: 1; min-width: 0; }
+  .resolution-dialog .dialog-actions > span { flex-basis: 100%; }
+}
