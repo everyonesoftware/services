@@ -64,7 +64,8 @@ try {
     assert.equal(await count.evaluate(el => getComputedStyle(el).fontSize), '16px')
     assert.ok((await count.boundingBox()).height >= 48)
     assert.equal(await page.locator('.project-summary-counts').evaluate(el => getComputedStyle(el).fontSize), '14px')
-    assert.equal(await page.locator('.project-container-count').isVisible(), false)
+    assert.equal(await page.locator('.project-summary-counts').innerText(), '1 container')
+    assert.equal(await page.locator('.project-container-count').count(), 0)
     assert.equal(await page.locator('.project-health .status-badge').count(), 1)
     const metadata = await page.locator('.project-metadata').evaluate(el => {
       const service = el.querySelector('.project-summary-counts').getBoundingClientRect()

@@ -276,6 +276,17 @@ test('Docker activity keeps explanatory copy collapsed without hiding live state
   assert.ok(html.indexOf('No Compose work running or queued.') < html.indexOf('activity-help'))
 })
 
+test('project summaries count containers, including replicas, without repeating the count in expanded content', () => {
+  for (const count of [0, 1, 2]) {
+    const project = { ...fixture, containers: Array.from({ length: count }, (_, index) => ({ ...fixture.containers[0], id: `web-${index}`, name: `site-web-${index}` })) }
+    const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project, onReview() {}, actionsDisabled: false }))
+    const summary = html.match(/<summary class="group-summary project-summary">([\s\S]*?)<\/summary>/)[1]
+    assert.match(summary, new RegExp(`class="project-summary-counts">${count} ${count === 1 ? 'container' : 'containers'}<`))
+    assert.doesNotMatch(summary, />\d+ services?\b|project-container-count/)
+    assert.doesNotMatch(html, /project-expanded-facts|containers? in this project/)
+  }
+})
+
 test('healthy rows avoid redundant health prose and duplicate container names', () => {
   const container = { ...fixture.containers[0], name: 'web', health: 'healthy', monitorStatus: 'healthy', monitorReason: 'Health check passing', updateAvailable: false }
   const html = renderToStaticMarkup(createElement(components.ProjectGroup, { project: { name: 'site', containers: [container] }, onReview: () => {}, actionsDisabled: false }))
