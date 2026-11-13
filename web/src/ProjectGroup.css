@@ -1,5 +1,5 @@
 /* Navigation links and mutation controls are separate, never nested. */
-.app-content .project-summary { display: flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 76px; }
+.app-content .project-summary { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 40px 0 16px; min-height: 76px; }
 .app-content .project-summary .project-link { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; min-height: 76px; text-decoration: none; padding: 12px 0; }
 .app-content .project-summary .group-identity { display: grid; gap: 4px; flex: 1; min-width: 0; }
 .app-content .project-summary .identity-name { font-size: 14px; font-weight: 600; }
@@ -10,12 +10,14 @@
 .app-content .project-health .status-badge { padding: 0; border: 0; background: none; }
 .app-content .project-summary .project-signals { width: auto; padding: 0; flex: none; }
 .navigation-arrow { font-size: 23px; line-height: 1; color: #7e8d7f; flex: none; }
+.app-content .project-summary .navigation-arrow { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
 .app-content .project-summary .icon-button { flex: none; }
 .app-content .project-update { font-size: 10px; color: #7a683c; border-color: #d9cdaa; white-space: nowrap; }
 .app-content .project-update-help { font-size: 12px; color: var(--muted); margin-top: 12px; }
 
 @media (max-width: 640px) {
-  .app-content .project-summary { flex-wrap: nowrap; gap: 8px; min-height: 94px; padding: 0 12px; }
+  .app-content .project-summary { flex-wrap: nowrap; gap: 8px; min-height: 94px; padding: 0 36px 0 12px; }
+  .app-content .project-summary .navigation-arrow { right: 12px; }
   .app-content .project-summary .project-link { min-height: 94px; gap: 8px; padding: 14px 0; }
   .app-content .project-summary .identity-name { font-size: 18px; line-height: 24px; font-weight: 600; }
   .app-content .project-summary .project-metadata { gap: 2px 6px; font-size: 14px; line-height: 20px; color: #59685e; }

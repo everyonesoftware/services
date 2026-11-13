@@ -43,6 +43,14 @@ try {
   assert.equal(await page.locator('a.project-link').getAttribute('href'), '#service/media')
   assert.equal(await page.locator('a.project-link button').count(), 0)
   const count = page.locator('.group-summary').getByRole('button', { name: 'Review 1 update', exact: true })
+  const assertUpdateBeforeArrow = async () => {
+    const button = await count.boundingBox()
+    const arrow = await page.locator('.project-summary .navigation-arrow').boundingBox()
+    assert.ok(button.x + button.width < arrow.x, 'Update button sits to the left of the navigation chevron')
+    assert.ok(Math.abs(button.y + button.height / 2 - arrow.y - arrow.height / 2) < 2, 'Update button and chevron remain vertically aligned')
+  }
+  await assertUpdateBeforeArrow()
+  if (process.env.PROJECT_UPDATE_SCREENSHOT) await page.screenshot({ path: process.env.PROJECT_UPDATE_SCREENSHOT.replace(/\.png$/, '-desktop.png') })
   assert.equal(await count.count(), 1, 'The summary update count must be an actionable review button')
   assert.equal(await page.locator('.project-group details, .project-group .container-row').count(), 0)
   assert.equal(page.url(), monitorURL, 'Independent actions do not navigate')
@@ -68,6 +76,7 @@ try {
   console.log('PASS: compact service summary actionable count, no navigation, explicit approval, Cancel autofocus, Escape/Cancel focus restoration.')
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 640 })
+    await assertUpdateBeforeArrow()
     assert.equal(await page.locator('.project-summary .identity-name').evaluate(el => getComputedStyle(el).fontSize), '18px')
     assert.equal(await count.evaluate(el => getComputedStyle(el).fontSize), '16px')
     assert.ok((await count.boundingBox()).height >= 48)
@@ -113,6 +122,10 @@ try {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   }
   await page.setViewportSize({ width: 1200, height: 900 })
+  await page.locator('.project-summary .navigation-arrow').click()
+  await page.getByRole('heading', { name: 'media', exact: true }).waitFor()
+  await page.goBack()
+  await count.waitFor()
   console.log('PASS: 390px/320px typography, editable project icons, real health metadata, technical scope, fixed visible footer and no horizontal overflow.')
   await count.click()
   await page.getByRole('button', { name: 'Confirm & update', exact: true }).click()
