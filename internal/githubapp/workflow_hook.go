@@ -173,7 +173,7 @@ func versionSource(root, job *yaml.Node, steps *yaml.Node, before int, value str
 	if m := regexp.MustCompile(`^\$\{\{needs\.([A-Za-z_][A-Za-z0-9_-]*)\.outputs\.([A-Za-z_][A-Za-z0-9_]*)\}\}$`).FindStringSubmatch(value); m != nil {
 		source := yamlField(yamlField(root, "jobs"), m[1])
 		sourceSteps := yamlField(source, "steps")
-		if source == nil || sourceSteps == nil || !needsJob(job, m[1]) || !unconditional(source) {
+		if source == nil || sourceSteps == nil || !needsJob(job, m[1]) || !availableVersionJob(source, job) {
 			return false
 		}
 		return versionSource(root, source, sourceSteps, len(sourceSteps.Content), yamlValue(yamlField(source, "outputs"), m[2]), depth+1)
@@ -290,7 +290,10 @@ func validateNotificationHook(text string) error {
 			return fail("Only hosted ubuntu-latest, ubuntu-22.04 or ubuntu-24.04 publication execution is supported.")
 		}
 	}
-	if yamlField(root, "defaults") != nil || !unconditional(push) || yamlValue(yamlField(push, "with"), "push") != "true" || yamlField(push, "env") != nil {
+	if !supportedWorkflowDefaults(root) {
+		return fail("Only workflow run defaults selecting the bash shell are supported.")
+	}
+	if !unconditional(push) || yamlValue(yamlField(push, "with"), "push") != "true" || yamlField(push, "env") != nil {
 		return fail("The actual push must be unconditional, push:true and fail on error.")
 	}
 	if context := yamlValue(yamlField(push, "with"), "context"); context != "" && context != "." {
@@ -325,14 +328,8 @@ func validateNotificationHook(text string) error {
 	}
 	match := regexp.MustCompile(`^\$\{\{steps\.([A-Za-z_][A-Za-z0-9_]*)\.outputs\.tags\}\}$`).FindStringSubmatch(scalarBinding(tags))
 	if match != nil {
-		found := false
-		for _, step := range steps.Content[:pushIndex] {
-			if yamlValue(step, "id") == match[1] && action(step, "docker/metadata-action") && unconditional(step) {
-				found = true
-			}
-		}
-		if !found {
-			return fail("The actual tag metadata producer is missing or conditional.")
+		if publicationTagProducer(steps, pushIndex, tags) == nil {
+			return fail("The actual tag producer is missing, conditional or uses unsupported execution.")
 		}
 	}
 	version, err := publicationBuildVersion(with)

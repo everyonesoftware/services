@@ -57,6 +57,22 @@ test('supports an image name different from its GitHub source repository', () =>
   assert.deepEqual(custom.tags, ['latest', '42']);
 });
 
+test('Tasks script-produced tags preserve latest omission on old publication reruns', () => {
+  for (const tags of [['42', 'latest'], ['42']]) {
+    const captured = createPayload({
+      ...env(), GITHUB_REPOSITORY: 'everyonesoftware/tasks',
+      PUBLISHED_TAGS: tags.map(tag => `ghcr.io/everyonesoftware/tasks:${tag}`).join('\n'),
+    }, publishedAt);
+    assert.equal(captured.repository, 'ghcr.io/everyonesoftware/tasks');
+    assert.equal(captured.version, '42');
+    assert.deepEqual(captured.tags, tags);
+  }
+  // Unknown shell output still fails closed at capture time, before sending.
+  for (const references of ['docker.io/everyonesoftware/tasks:42', 'ghcr.io/everyonesoftware/tasks:42\nghcr.io/other/image:latest']) {
+    assert.throws(() => createPayload({ ...env(), PUBLISHED_TAGS: references }, publishedAt));
+  }
+});
+
 test('publisher capture accepts the exact GHCR repositories supported by managed keys', () => {
   for (const repository of ['ghcr.io/example/my__app', 'ghcr.io/example/my--app', 'ghcr.io/example/nested/app']) {
     assert.equal(createPayload({ ...env(), PUBLISHED_TAGS: `${repository}:latest` }, publishedAt).repository, repository);

@@ -128,8 +128,11 @@ func provisionConventionalWorkflow(text string) (string, error) {
 	if root.Content[len(root.Content)-2].Value != "jobs" {
 		return fail("Automatic source-preserving edits require jobs to be the final workflow mapping.")
 	}
-	if yamlField(root, "defaults") != nil || yamlField(root, "concurrency") != nil {
-		return fail("Custom workflow defaults or concurrency cannot be safely adapted automatically.")
+	if !supportedWorkflowDefaults(root) {
+		return fail("Only workflow run defaults selecting the bash shell are supported; custom working directories or shells require manual review.")
+	}
+	if !supportedExistingConcurrency(root) {
+		return fail("Existing workflow concurrency must use a static shared group without cancelling running publications.")
 	}
 	var job, steps, push *yaml.Node
 	jobID := ""
@@ -207,10 +210,14 @@ func provisionConventionalWorkflow(text string) (string, error) {
 	metaMatch := regexp.MustCompile(`^\$\{\{\s*steps\.([A-Za-z_][A-Za-z0-9_]*)\.outputs\.tags\s*\}\}$`).FindStringSubmatch(tags)
 	ghcr := false
 	if metaMatch != nil {
-		for i, step := range steps.Content {
-			if i < pushIndex && yamlValue(step, "id") == metaMatch[1] && action(step, "docker/metadata-action") {
+		if step := publicationTagProducer(steps, pushIndex, tags); step != nil {
+			if action(step, "docker/metadata-action") {
 				image := yamlValue(yamlField(step, "with"), "images")
 				ghcr = regexp.MustCompile(`^ghcr\.io/(\$\{\{\s*github\.repository\s*\}\}|[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*)$`).MatchString(image)
+			} else {
+				// Preserve evaluated shell output verbatim. The retained-payload
+				// sender validates that it contains one GHCR image at runtime.
+				ghcr = true
 			}
 		}
 	} else {
@@ -315,8 +322,11 @@ func provisionConventionalWorkflow(text string) (string, error) {
 		insertions[pushStart+1] += "        id: " + pushID + "\n"
 	}
 	insertions[outputLine] += outputText
-	// Ensure all workflow runs participating in mutable-tag publication serialize.
-	insertions[jobs.Line-2] += "concurrency:\n  group: services-publish-${{ github.repository }}\n  cancel-in-progress: false\n  queue: max\n\n"
+	// Preserve an existing shared lock and its queue policy. Only workflows
+	// without concurrency need a generated publication serialization group.
+	if yamlField(root, "concurrency") == nil {
+		insertions[jobs.Line-2] += "concurrency:\n  group: services-publish-${{ github.repository }}\n  cancel-in-progress: false\n  queue: max\n\n"
+	}
 	var out bytes.Buffer
 	for i, line := range lines {
 		out.WriteString(insertions[i])
