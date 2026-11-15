@@ -66,6 +66,7 @@ type Server struct {
 	mutationError                   error
 	source                          ContainerSource
 	actionSource                    ContainerSource
+	logSource                       *logBackend
 	updates                         UpdateApplier
 	updater                         ServiceUpdater
 	allowedHosts                    map[string]struct{}
@@ -124,6 +125,7 @@ func newWithActionsAndOrigin(source ContainerSource, updates UpdateApplier, upda
 	s.mux.HandleFunc("GET /api/operations/{id}", s.operation)
 	s.mux.HandleFunc("POST /api/operations/{id}/acknowledge", s.acknowledge)
 	s.mux.HandleFunc("GET /api/projects", s.projects)
+	s.mux.HandleFunc("GET /api/logs", s.logs)
 	s.mux.HandleFunc("GET /api/monitor", s.monitorInfo)
 	s.mux.HandleFunc("POST /api/monitor/resolve", s.resolveMissing)
 	s.mux.HandleFunc("POST /api/monitor/undo", s.undoMissingResolution)

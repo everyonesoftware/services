@@ -75,6 +75,7 @@ func main() {
 		log.Fatalf("invalid SERVICES_PUBLIC_ORIGIN: %v", err)
 	}
 	handler.SetActionSource(source)
+	handler.SetLogSource(source)
 	authentication, err := configureAuthenticationAt(handler, os.Getenv("SERVICES_DATA_DIR"))
 	if err != nil {
 		// Never expose a network-trusted dashboard if authentication cannot start.

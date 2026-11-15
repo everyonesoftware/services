@@ -1,0 +1,43 @@
+.detail-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex: none; }
+.detail-tabs button { min-height: 44px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 10px 2px; font: inherit; font-size: 13px; }
+.detail-tabs button[aria-selected="true"] { color: var(--teal); border-bottom-color: var(--teal); font-weight: 600; }
+.app-content > .service-detail:has(.detail-logs-panel) { height: 100%; display: flex; flex-direction: column; }
+.service-detail:has(.detail-logs-panel) > * { flex-shrink: 0; }
+.service-detail:has(.detail-logs-panel) .detail-status { margin-bottom: 12px; }
+.detail-logs-panel { display: flex; flex: 1 !important; min-height: 0; }
+.logs-view { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; gap: 10px; }
+.logs-heading { display: flex; align-items: baseline; gap: 12px; font-size: 13px; }
+.logs-heading span { color: var(--muted); font-size: 12px; }
+.logs-output { flex: 1; min-height: 0; min-width: 0; overflow: auto; border: 1px solid #3b4840; border-radius: 6px; background: #202a26; color: #e0e7df; padding: 12px; font: 12px/1.7 var(--mono); overflow-anchor: none; }
+.logs-scope-view { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; gap: 10px; }
+.logs-filters, .logs-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; flex-shrink: 0; }
+.logs-filters label, .logs-scope { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); min-width: 0; }
+.logs-scope { flex-direction: row; align-items: center; }
+.logs-scope select { max-width: 100%; }
+.logs-filters .logs-search { flex: 1; min-width: 150px; }
+.logs-filters input[type="search"], .logs-filters select, .logs-scope select { min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: inherit; padding: 6px 8px; min-height: 34px; font: inherit; font-size: 12px; }
+.logs-filters .logs-wrap { flex-direction: row; align-items: center; min-height: 34px; }
+.logs-controls { align-items: center; font-size: 11px; color: var(--muted); }
+.logs-controls button, .logs-warning button { min-height: 34px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--teal); padding: 5px 10px; font: inherit; font-size: 12px; }
+.logs-controls button:disabled { opacity: .5; }
+.logs-count { margin-left: auto; }
+.logs-warning { background: #fff7e6; border: 1px solid #e2d3b2; padding: 8px 12px; border-radius: 4px; color: #755d30; font-size: 12px; max-height: 100px; overflow: auto; flex-shrink: 0; margin: 0; }
+.logs-output.wrap .log-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.logs-output.wrap .log-message { min-width: 0; }
+.log-stream { color: #a9b9af; }
+.log-source { color: #b3d2b2; }
+.log-stream.stderr { color: #eac18c; }
+.logs-buffer-note { color: var(--muted); font-size: 12px; margin: 0; }
+@media (max-width: 640px) { .logs-filters { gap: 6px 8px; } .logs-filters .logs-search { flex-basis: 100%; } .logs-filters label { flex: 1; } .logs-filters .logs-wrap { flex: none; } .logs-scope select { flex: 1; } .logs-controls { gap: 6px; } .logs-controls button { min-height: 40px; padding: 5px 7px; } .logs-count { display: none; } .logs-output.wrap .log-line { flex-wrap: wrap; gap: 0 8px; margin-bottom: 6px; } .logs-output.wrap .log-message { flex-basis: 100%; } .logs-output.wrap time { font-size: 10px; } }
+.log-line { display: flex; gap: 12px; white-space: pre; min-height: 21px; }
+.log-line time { color: #a9b9af; }
+.log-message { flex: 1; }
+@media (max-width: 640px) {
+  .logs-output { font-size: 14px; }
+  .logs-output .log-message { font-size: 16px; line-height: 1.6; }
+  .logs-output.wrap time { font-size: 13px; flex-basis: 100%; }
+  .logs-output.wrap .log-line { padding: 10px 0; border-bottom: 1px solid #3b4840; }
+  .logs-output .log-source { font-size: 14px; }
+  .logs-output .log-stream { font-size: 13px; }
+}
+@media (max-width: 640px) { .service-detail:has(.detail-logs-panel) .detail-status > span:last-child { display: none; } .service-detail:has(.detail-logs-panel) .detail-status { margin-bottom: 4px; } .service-detail:has(.detail-logs-panel) .detail-tabs { margin-bottom: 10px; } .logs-heading { display: none; } .service-detail:has(.detail-logs-panel) .detail-header { margin-bottom: 12px; padding-bottom: 12px; } .logs-output { padding: 8px; } }
