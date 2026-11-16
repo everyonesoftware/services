@@ -7,6 +7,7 @@ import './Publishers.css'
 import { AppShell } from './AppShell.tsx'
 import { PageHeader } from './PageHeader.tsx'
 import { Breadcrumb } from './Breadcrumb.tsx'
+import { PublisherDeletion } from './PublisherDeletion.tsx'
 
 export type { AppPage } from './AppShell.tsx'
 export { AppNavigation } from './AppShell.tsx'
@@ -139,22 +140,22 @@ export function PublisherWorkflowPending({ plan, prUrl }: { plan: PublisherPlan;
   return <><h2>Waiting for workflow approval</h2><p>{plan.repository.fullName} · <code>{plan.imageRepository}</code></p><div className="publisher-info publisher-warning"><strong>Merge the setup PR</strong>Review and merge the proposed changes on GitHub. Services does not bypass repository rules or check merge status in the background. Then select Review again to inspect the current workflow before applying configuration.</div>{githubPullRequestUrl(prUrl, plan.repository) ? <a className="button secondary publisher-pr-link" href={prUrl} target="_blank" rel="noreferrer">Review setup pull request ↗</a> : <p className="notice danger" role="alert">The setup PR link could not be verified. No external link was opened.</p>}</>
 }
 
-type ManagementAction = 'disconnect' | 'rotate' | 'reconnect' | 'remove'
+type ManagementAction = 'disconnect' | 'rotate' | 'reconnect'
 type ConnectionView = 'publication' | 'connection'
 type ConnectionProps = { connection: Connection; busy: boolean; onTest: (id: string) => void; onRecover?: (id: string) => void; onManage?: (connection: Connection, action: ManagementAction) => void; view?: ConnectionView }
 const connectionLabels: Record<Connection['state'], string> = { configured: 'Configured', awaiting_callback: 'Waiting for authenticated callback', verified: 'Connectivity verified', error: 'Connection needs attention', disconnected: 'Disconnected' }
 const verifiedPublication = (connection: Connection) => connection.state === 'verified' && connection.lastPublication?.digest && connection.lastPublication.receivedAt ? connection.lastPublication : null
 
-export function PublisherConnectionRow({ connection, expanded, view = 'publication', onToggle, onView, ...actions }: ConnectionProps & { expanded: boolean; onToggle: () => void; onView: (view: ConnectionView) => void }) {
+export function PublisherConnectionRow({ connection, expanded, view = 'publication', onToggle, onView, onDelete, ...actions }: ConnectionProps & { expanded: boolean; onToggle: () => void; onView: (view: ConnectionView) => void; onDelete?: (connection: Connection) => void }) {
   const id = `publisher-${encodeURIComponent(connection.id)}`
   const publication = verifiedPublication(connection)
   return <article className="publisher-connection-row" aria-label={`Publisher ${connection.repository.fullName}`}>
-    <button type="button" className="publisher-row-summary" aria-expanded={expanded} aria-controls={`${id}-details`} onClick={onToggle}>
+    <div className="publisher-row-heading"><button type="button" className="publisher-row-summary" aria-expanded={expanded} aria-controls={`${id}-details`} onClick={onToggle}>
       <span className="publisher-row-identity"><strong className="publisher-row-name">{connection.repository.fullName}</strong><code>{connection.imageRepository}</code></span>
       <span className={`publisher-row-state ${connection.state}`}>{connectionLabels[connection.state]}</span>
       <span className="publisher-row-delivery">{publication ? 'Image received' : 'No image received'}</span>
       <span className="publisher-row-chevron" aria-hidden="true">{expanded ? '−' : '›'}</span>
-    </button>
+    </button>{onDelete && <button type="button" className="button secondary publisher-danger publisher-row-delete" disabled={actions.busy} onClick={() => onDelete(connection)}>{connection.deletion ? 'Continue deletion' : 'Delete'}</button>}</div>
     {expanded && <div className="publisher-row-details" id={`${id}-details`}>
       <div className="publisher-detail-tabs" role="tablist" aria-label={`Details for ${connection.repository.fullName}`}>
         {(['publication', 'connection'] as const).map(item => <button type="button" key={item} id={`${id}-${item}`} role="tab" aria-selected={view === item} tabIndex={view === item ? 0 : -1} aria-controls={`${id}-panel`} onClick={() => onView(item)} onKeyDown={event => {
@@ -174,6 +175,7 @@ export function PublisherConnectionRow({ connection, expanded, view = 'publicati
 
 export function PublisherConnection({ connection, busy, onTest, onRecover, onManage, view = 'connection' }: ConnectionProps) {
   const publication = verifiedPublication(connection)
+  const accessRemoved = connection.deletion?.tailscaleRevocationAttested === true || connection.deletion?.tailscaleConfirmed === true
   if (view === 'publication') return <section className="publisher-connection" aria-label="Latest image">
     {publication ? <section className="publisher-publication" aria-label="Latest publication"><h3>{publication.version || 'Latest image'}</h3><p className="publisher-muted">Image announcement received. Installation still requires your confirmation in Monitor.</p><dl className="publisher-facts"><div><dt>Image repository</dt><dd><code>{connection.imageRepository}</code></dd></div><div><dt>Tags</dt><dd><code>{publication.tags.join(' · ') || 'No tags supplied'}</code></dd></div></dl>
       <details className="publisher-technical"><summary>Technical metadata</summary><dl className="publisher-facts"><div className="publisher-digest"><dt>Image digest</dt><dd><code>{publication.digest}</code></dd></div><div><dt>Commit</dt><dd><code>{publication.commit || 'Not supplied'}</code></dd></div><div><dt>Delivery result</dt><dd>{publication.result}</dd></div><div><dt>Published</dt><dd>{dateLabel(publication.publishedAt)}</dd></div><div><dt>Received</dt><dd>{dateLabel(publication.receivedAt)}</dd></div></dl></details>
@@ -184,11 +186,12 @@ export function PublisherConnection({ connection, busy, onTest, onRecover, onMan
     <h3>{connectionLabels[connection.state]}</h3>
     {connection.state === 'verified' ? <p className="publisher-muted">Authenticated connectivity test passed—not a successful publication. Installation still requires your confirmation.</p> : connection.state === 'awaiting_callback' ? <p className="publisher-muted" role="status">Waiting for authenticated callback. Dispatch acceptance is not verification.</p> : <p className="publisher-muted">{connection.state === 'disconnected' ? 'This connection is disconnected. Reconnect to resume notifications.' : 'Configuration is saved. Push delivery has not been verified.'}</p>}
     {connection.error && <p className="notice danger" role="alert">{connection.error}</p>}
-    {connection.state === 'error' && <p className="publisher-muted">Check the workflow run, repository trust, and runner tag’s HTTPS access. Repair reuses the saved setup; no duplicate key is created.</p>}
+    {accessRemoved && <p className="publisher-info">Manual Tailscale confirmation is saved. Testing, repair, rotation, and reconnection are disabled. Continue deletion from the publisher row; emergency disconnect remains available.</p>}
+    {connection.state === 'error' && !accessRemoved && <p className="publisher-muted">Check the workflow run, repository trust, and runner tag’s HTTPS access. Repair reuses the saved setup; no duplicate key is created.</p>}
     <dl className="publisher-facts"><div><dt>Image repository</dt><dd><code>{connection.imageRepository}</code></dd></div><div><dt>Default branch</dt><dd><code>{connection.repository.defaultBranch}</code></dd></div></dl>
     <details className="publisher-technical"><summary>Setup &amp; diagnostic details</summary><dl className="publisher-facts"><div><dt>Created</dt><dd>{dateLabel(connection.createdAt)}</dd></div>{connection.verifiedAt && <div><dt>Connectivity verified</dt><dd>{dateLabel(connection.verifiedAt)}</dd></div>}</dl><p>GitHub Actions delivers metadata over Tailscale. {connection.state === 'awaiting_callback' ? 'Services refreshes its saved acknowledgement every 3 seconds while waiting; it does not poll GitHub or check for publications.' : 'Connectivity checks and image publications are separate.'}</p></details>
-    {connection.state !== 'disconnected' && <div className="publisher-connection-actions">{connection.state !== 'awaiting_callback' && <button className="button secondary" disabled={busy} onClick={() => connection.state === 'error' && onRecover ? onRecover(connection.id) : onTest(connection.id)}>{connection.state === 'error' && onRecover ? 'Repair & retry push' : connection.state === 'verified' ? 'Test push' : 'Retry push test'}</button>}{onManage && <>{connection.state !== 'awaiting_callback' && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'rotate')}>Rotate key</button>}<button className="button publisher-disconnect" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Disconnect</button></>}</div>}
-    {connection.state === 'disconnected' && onManage && <div className="publisher-connection-actions"><button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'reconnect')}>Reconnect</button>{connection.remoteDisablePending && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Retry GitHub cleanup</button>}<button className="button publisher-disconnect" disabled={busy} onClick={() => onManage(connection, 'remove')}>Remove</button></div>}
+    {connection.state !== 'disconnected' && <div className="publisher-connection-actions">{connection.state !== 'awaiting_callback' && !accessRemoved && <button className="button secondary" disabled={busy} onClick={() => connection.state === 'error' && onRecover ? onRecover(connection.id) : onTest(connection.id)}>{connection.state === 'error' && onRecover ? 'Repair & retry push' : connection.state === 'verified' ? 'Test push' : 'Retry push test'}</button>}{onManage && <>{connection.state !== 'awaiting_callback' && !accessRemoved && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'rotate')}>Rotate key</button>}<button className="button publisher-disconnect" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Disconnect</button></>}</div>}
+    {connection.state === 'disconnected' && onManage && <div className="publisher-connection-actions">{!accessRemoved && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'reconnect')}>Reconnect</button>}{connection.remoteDisablePending && <button className="button secondary" disabled={busy} onClick={() => onManage(connection, 'disconnect')}>Retry GitHub cleanup</button>}</div>}
   </section>
 }
 
@@ -201,10 +204,10 @@ export function PublisherConfirmation({ connection, action, busy, error, onCance
     return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus() }
   }, [])
   const disconnect = action === 'disconnect'
-  const destructive = disconnect || action === 'remove'
-  const title = { disconnect: 'Disconnect', rotate: 'Rotate key for', reconnect: 'Reconnect', remove: 'Remove' }[action]
-  const label = { disconnect: 'Disconnect publisher', rotate: 'Rotate & test push', reconnect: 'Reconnect & test push', remove: 'Remove publisher' }[action]
-  const description = action === 'reconnect' ? <><p>Create a fresh credential, replace the GitHub Actions secret for this saved repository, and dispatch a new connectivity test. The revoked credential is never restored.</p><p>Notifications are enabled only after an authenticated callback verifies the new connection. Conflicting repository settings stop reconnection.</p></> : action === 'remove' ? <><p>Remove this disconnected connection from Services. Historical publications remain available.</p><p>GitHub resources and shared Tailscale access are not deleted. If GitHub cleanup is pending, retry cleanup before removing this record.</p></> : disconnect ? <><p>Revoke this publisher’s local key and disable its owned notification configuration. Historical publications remain available.</p><p>Shared Tailscale access and federation are not deleted. Shared or changed GitHub resources are not removed.</p></> : <><p>Create a replacement key, update the repository secret, and dispatch a new push test. The old key stays active until Services receives the authenticated callback.</p><p>An accepted dispatch is not success. Keep the saved connection while verification completes.</p></>
+  const destructive = disconnect
+  const title = { disconnect: 'Disconnect', rotate: 'Rotate key for', reconnect: 'Reconnect' }[action]
+  const label = { disconnect: 'Disconnect publisher', rotate: 'Rotate & test push', reconnect: 'Reconnect & test push' }[action]
+  const description = action === 'reconnect' ? <><p>Create a fresh credential, replace the GitHub Actions secret for this saved repository, and dispatch a new connectivity test. The revoked credential is never restored.</p><p>Notifications are enabled only after an authenticated callback verifies the new connection. Conflicting repository settings stop reconnection.</p></> : disconnect ? <><p>Revoke this publisher’s local key and disable its owned notification configuration. Historical publications remain available.</p><p>Shared Tailscale access and federation are not deleted. Shared or changed GitHub resources are not removed.</p></> : <><p>Create a replacement key, update the repository secret, and dispatch a new push test. The old key stays active until Services receives the authenticated callback.</p><p>An accepted dispatch is not success. Keep the saved connection while verification completes.</p></>
   return <dialog className="publisher-confirmation" ref={dialog} aria-labelledby="publisher-confirmation-title" aria-describedby="publisher-confirmation-description" onCancel={event => { event.preventDefault(); if (!busy) onCancel() }}><div className="publisher-confirmation-body"><p className="eyebrow">PUBLISHER CONNECTION</p><h2 id="publisher-confirmation-title">{title} {connection.repository.fullName}?</h2><p><code>{connection.imageRepository}</code></p><div id="publisher-confirmation-description">{description}</div>{error && <p className="notice danger" role="alert">{error}</p>}</div><footer className="publisher-footer"><button className="button secondary" ref={cancel} disabled={busy} onClick={onCancel}>Cancel</button><button className={`button primary ${destructive ? 'publisher-danger' : ''}`} disabled={busy} onClick={onConfirm}>{busy ? 'Please wait…' : label}</button></footer></dialog>
 }
 
@@ -235,6 +238,7 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
   const [plan, setPlan] = useState<PublisherPlan | null>(null)
   const [prUrl, setPrUrl] = useState('')
   const [confirmation, setConfirmation] = useState<{ connection: Connection; action: ManagementAction } | null>(null)
+  const [deletionId, setDeletionId] = useState('')
   const [connectionId, setConnectionId] = useState('')
   const [expandedConnection, setExpandedConnection] = useState<{ id: string; view: ConnectionView } | null>(null)
   const [revision, setRevision] = useState(0)
@@ -319,18 +323,13 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
   const recoverPush = (id: string) => void perform(async () => {
     const result = await api.recover(id); saveConnection(result.connection, step !== null); setStatus(await api.status())
   })
-  const manageConnection = (connection: Connection, action: ManagementAction) => { if (!lock.current) { setError(''); setConfirmation({ connection, action }) } }
+  const manageConnection = (connection: Connection, action: ManagementAction) => { if (!lock.current && !busy) { setError(''); setConfirmation({ connection, action }) } }
+  const deleteConnection = (connection: Connection) => { if (!lock.current && !busy) { setError(''); setDeletionId(connection.id) } }
   const confirmManagement = () => void perform(async () => {
     if (!confirmation) return
     try {
-      if (confirmation.action === 'remove') {
-        const result = await api.remove(confirmation.connection.id)
-        if (!result.removed) throw new Error('Removal was not confirmed. Refresh saved state before retrying.')
-        setStatus(current => current ? { ...current, connections: current.connections.filter(saved => saved.id !== confirmation.connection.id) } : current)
-      } else {
-        const result = await api[confirmation.action](confirmation.connection.id)
-        setStatus(current => current ? { ...current, connections: current.connections.map(saved => saved.id === result.connection.id ? result.connection : saved) } : current)
-      }
+      const result = await api[confirmation.action](confirmation.connection.id)
+      setStatus(current => current ? { ...current, connections: current.connections.map(saved => saved.id === result.connection.id ? result.connection : saved) } : current)
     } catch (cause) {
       // A failed remote operation can still persist local progress. Keep the
       // confirmation/error visible, but never leave its card showing stale state.
@@ -374,7 +373,7 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
       {!status && !loading && <section className="publisher-panel publisher-empty"><h2>Publishers couldn’t be loaded</h2><p>Check your connection and use Refresh to try again.</p></section>}
       {status && <>{!available && <div className="publisher-info publisher-warning" role="alert"><strong>Publisher setup is unavailable</strong>{status.reason || 'This server is not configured for publisher setup.'}</div>}
         {step === null && <GitHubPermissionNotice github={status.github} busy={busy} onFinish={() => changeStep(0)} />}
-        {step === null ? <><section className="publisher-list-heading" aria-label="Publisher connections"><span className="publisher-muted">{status.github.connected ? 'GitHub App connected' : 'GitHub App not connected'}</span>{!busy && githubVariablesReady(status.github) && status.github.installUrl && githubInstallUrl(status.github.installUrl) && <a href={status.github.installUrl} target="_blank" rel="noreferrer">Manage repository access ↗</a>}</section>{status.connections.length === 0 && <section className="publisher-panel publisher-empty"><h2>No publishers connected</h2><p>Connect a repository to begin. Image installation always requires confirmation.</p></section>}<div className="publisher-connections">{status.connections.map(connection => <PublisherConnectionRow key={connection.id} connection={connection} expanded={expandedConnection?.id === connection.id} view={expandedConnection?.id === connection.id ? expandedConnection.view : 'publication'} onToggle={() => setExpandedConnection(current => current?.id === connection.id ? null : { id: connection.id, view: connection.state === 'error' || connection.state === 'disconnected' ? 'connection' : 'publication' })} onView={view => setExpandedConnection({ id: connection.id, view })} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} />)}</div></>
+        {step === null ? <><section className="publisher-list-heading" aria-label="Publisher connections"><span className="publisher-muted">{status.github.connected ? 'GitHub App connected' : 'GitHub App not connected'}</span>{!busy && githubVariablesReady(status.github) && status.github.installUrl && githubInstallUrl(status.github.installUrl) && <a href={status.github.installUrl} target="_blank" rel="noreferrer">Manage repository access ↗</a>}</section>{status.connections.length === 0 && <section className="publisher-panel publisher-empty"><h2>No publishers connected</h2><p>Connect a repository to begin. Image installation always requires confirmation.</p></section>}<div className="publisher-connections">{status.connections.map(connection => <PublisherConnectionRow key={connection.id} connection={connection} expanded={expandedConnection?.id === connection.id} view={expandedConnection?.id === connection.id ? expandedConnection.view : 'publication'} onToggle={() => setExpandedConnection(current => current?.id === connection.id ? null : { id: connection.id, view: connection.state === 'error' || connection.state === 'disconnected' ? 'connection' : 'publication' })} onView={view => setExpandedConnection({ id: connection.id, view })} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} onDelete={deleteConnection} />)}</div></>
           : <section className="publisher-panel publisher-wizard" aria-label="Publisher setup"><ol className="publisher-steps">{steps.map((name, index) => <li key={name} className={index === step ? 'active' : index < step ? 'done' : ''} aria-current={index === step ? 'step' : undefined}><span>{index < step ? '✓' : index + 1}</span>{name}</li>)}<li className="publisher-aside">GitHub Actions pushes metadata to Services over your private Tailscale connection.<br /><br />No automatic container updates.</li></ol><div className="publisher-wizard-content"><fieldset className="publisher-controls" disabled={busy || !available} aria-label="Publisher setup controls"><div className="publisher-step-content" key={step} role="region" aria-label="Publisher step content" tabIndex={0}>
             {step === 0 && <><h2>Connect your GitHub App</h2><p>The GitHub App can be reused for repositories you explicitly authorize. Tailscale trust is configured separately after selecting a repository.</p><div className="publisher-auth-row"><div><h3>GitHub App</h3><p>{status.github.connected ? status.github.name || 'Services GitHub App is connected.' : 'GitHub displays its own external consent screen. Review permissions and approve only the repositories you choose.'}</p></div>{status.github.connected ? <span className="publisher-badge good">Connected</span> : <span className="publisher-badge">Not connected</span>}</div>
               {!status.github.connected && <GitHubRegistration owner={registrationOwner} organization={organization} onOwner={next => { setRegistrationOwner(next); setManifest(null); setError('') }} onOrganization={next => { setOrganization(next); setManifest(null); setError('') }} onSubmit={event => { event.preventDefault(); startGitHub() }} />}
@@ -391,5 +390,5 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
             {step === 4 && (selectedConnection ? <PublisherConnection connection={selectedConnection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onManage={manageConnection} /> : <p className="publisher-info">This connection was not present in the server’s latest response. Refresh to check its saved state.</p>)}
           </div></fieldset><PublisherFooter step={step} busy={busy} available={available} canAdvance={!!canAdvance} workflowNeeded={workflowNeeded} pendingWorkflow={!!prUrl} onBack={() => step === 0 || step === 4 ? reset() : changeStep(step - 1)} onAdvance={advance} onCancel={reset} /></div></section>}
         </>}
-    </main>{confirmation && <PublisherConfirmation connection={confirmation.connection} action={confirmation.action} busy={busy} error={error} onCancel={() => { if (!lock.current) { setConfirmation(null); setError('') } }} onConfirm={confirmManagement} />}</AppShell>
+    </main>{deletionId && status?.connections.find(connection => connection.id === deletionId) && <PublisherDeletion key={deletionId} connection={status.connections.find(connection => connection.id === deletionId)!} api={api} onStatus={setStatus} onBusy={setBusy} onClose={() => setDeletionId('')} />}{confirmation && <PublisherConfirmation connection={confirmation.connection} action={confirmation.action} busy={busy} error={error} onCancel={() => { if (!lock.current) { setConfirmation(null); setError('') } }} onConfirm={confirmManagement} />}</AppShell>
 }

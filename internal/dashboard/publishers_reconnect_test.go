@@ -301,6 +301,9 @@ func TestPublisherReconnectStorageFailureRetainsSafeRetry(t *testing.T) {
 			if w := publisherRequest(s, "POST", path+"/disconnect", map[string]any{}, cookie, ""); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
+			if failure == "remove" {
+				confirmDeletionForTest(t, s, old.ID, cookie)
+			}
 			before, _ := store.Load()
 			directory := filepath.Join(t.TempDir(), "failure")
 			store, err := publishers.Open(directory)
@@ -386,6 +389,7 @@ func TestPublisherRemoveBlocksPendingCleanup(t *testing.T) {
 	if w = publisherRequest(s, "POST", path+"/disconnect", map[string]any{}, cookie, ""); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
+	confirmDeletionForTest(t, s, c.ID, cookie)
 	if w = publisherRequest(s, "DELETE", path, nil, cookie, ""); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -409,6 +413,7 @@ func TestPublisherRemoveDisconnectedRecordOnly(t *testing.T) {
 	if w := publisherRequest(s, "POST", path+"/disconnect", map[string]any{}, cookie, ""); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
+	confirmDeletionForTest(t, s, c.ID, cookie)
 	before, _ := store.Load()
 	calls := []int{base.configured, base.dispatched, base.enabled}
 	w := publisherRequest(s, "DELETE", path, nil, cookie, "")

@@ -15,6 +15,16 @@ import (
 // A partial failure leaves an owned branch that can be resumed, never deleted or
 // overwritten. Concurrent creates can return a safe conflict; retry re-verifies.
 func (c *Client) InstallWorkflow(ctx context.Context, app App, repo Repository, fingerprint string) (string, error) {
+	return c.changeWorkflow(ctx, app, repo, fingerprint, false)
+}
+
+// RemoveWorkflow opens an immutable cleanup PR; it never merges or writes the
+// default branch. Approval is bound to a fresh removal plan, not an install plan.
+func (c *Client) RemoveWorkflow(ctx context.Context, app App, repo Repository, fingerprint string) (string, error) {
+	return c.changeWorkflow(ctx, app, repo, fingerprint, true)
+}
+
+func (c *Client) changeWorkflow(ctx context.Context, app App, repo Repository, fingerprint string, removal bool) (string, error) {
 	if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(fingerprint) {
 		return "", errors.New("invalid workflow approval fingerprint")
 	}
@@ -24,7 +34,7 @@ func (c *Client) InstallWorkflow(ctx context.Context, app App, repo Repository, 
 	if err != nil {
 		return "", err
 	}
-	snapshot, err := o.planWorkflow(repo, token)
+	snapshot, err := o.planWorkflowKind(repo, token, removal)
 	if err != nil {
 		return "", err
 	}
@@ -32,11 +42,22 @@ func (c *Client) InstallWorkflow(ctx context.Context, app App, repo Repository, 
 		return "", errors.New("workflow approval is stale or unsupported; review a fresh plan")
 	}
 	if len(snapshot.plan.Files) == 0 {
+		if removal {
+			return "", errors.New("Services integration is absent from the default branch; no cleanup pull request is needed")
+		}
 		return "", errors.New("workflow is already installed on the default branch; no pull request is needed")
 	}
 	base := "/repos/" + repo.FullName
 	branch := "services/publisher-onboarding/" + fingerprint
 	marker := "Services publisher onboarding plan " + fingerprint
+	title := "Connect Services publication notifications"
+	body := marker + "\n\nReview these workflow and sender changes before merging. Notifications remain opt-in and do not deploy images. Configure private-network federation and verify the authenticated connection callback before enabling delivery. Notification-only retries reuse the original retained publication payload."
+	if removal {
+		branch = "services/publisher-removal/" + fingerprint
+		marker = "Services publisher removal plan " + fingerprint
+		title = "Remove Services publication notifications"
+		body = marker + "\n\nReview this exact cleanup diff before merging. Build and publication jobs and shared helper scripts remain in place. After merging, verify that Services integration is absent from the actual default branch. Then manually revoke the publisher's Tailscale workload identity trust and confirm revocation before disconnecting the Services connection. This PR does not revoke Tailscale access, remove repository secrets or variables, or disconnect the connection."
+	}
 	ref, status, err := o.workflowRef(repo, token, branch)
 	if err != nil {
 		return "", err
@@ -51,9 +72,15 @@ func (c *Client) InstallWorkflow(ctx context.Context, app App, repo Repository, 
 		if code != 200 || current.Object.SHA != snapshot.sha {
 			return "", errors.New("workflow default branch changed; review a fresh plan")
 		}
-		entries := []map[string]string{}
+		entries := []map[string]any{}
 		for _, file := range snapshot.plan.Files {
-			entries = append(entries, map[string]string{"path": file.Path, "mode": "100644", "type": "blob", "content": file.After})
+			entry := map[string]any{"path": file.Path, "mode": "100644", "type": "blob"}
+			if file.After == "" {
+				entry["sha"] = nil
+			} else {
+				entry["content"] = file.After
+			}
+			entries = append(entries, entry)
 		}
 		var tree struct {
 			SHA string `json:"sha"`
@@ -103,8 +130,7 @@ func (c *Client) InstallWorkflow(ctx context.Context, app App, repo Repository, 
 	if len(prs) == 1 {
 		pr = prs[0]
 	} else {
-		body := marker + "\n\nReview these workflow and sender changes before merging. Notifications remain opt-in and do not deploy images. Configure private-network federation and verify the authenticated connection callback before enabling delivery. Notification-only retries reuse the original retained publication payload."
-		if _, err = o.request("POST", base+"/pulls", token, map[string]any{"title": "Connect Services publication notifications", "body": body, "head": branch, "base": repo.DefaultBranch, "draft": false, "maintainer_can_modify": false}, &pr, 201); err != nil {
+		if _, err = o.request("POST", base+"/pulls", token, map[string]any{"title": title, "body": body, "head": branch, "base": repo.DefaultBranch, "draft": false, "maintainer_can_modify": false}, &pr, 201); err != nil {
 			return "", err
 		}
 	}
@@ -152,7 +178,7 @@ func (o *operation) verifyWorkflowBranch(repo Repository, token, branch, sha, ma
 		if err != nil {
 			return err
 		}
-		if !exists || text != file.After {
+		if (file.After == "" && exists) || (file.After != "" && (!exists || text != file.After)) {
 			return errors.New("GitHub workflow content readback did not match")
 		}
 	}
@@ -179,6 +205,9 @@ func (o *operation) verifyWorkflowBranch(repo Repository, token, branch, sha, ma
 		status := "modified"
 		if file.Before == "" {
 			status = "added"
+		}
+		if file.After == "" {
+			status = "removed"
 		}
 		expected[file.Path] = status
 	}

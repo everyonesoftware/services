@@ -46,6 +46,10 @@ func (s *Server) publisherReconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Only disconnected publishers can be reconnected", 409)
 		return
 	}
+	if publisherTailscaleRevocationAttested(*c) {
+		http.Error(w, "Tailscale revocation was confirmed for this publisher. Complete deletion and add a new publisher to reconnect with fresh access.", 409)
+		return
+	}
 	for i, other := range state.Connections {
 		if i != index && other.Repository.ID == c.Repository.ID && other.State != "disconnected" {
 			http.Error(w, "Another saved connection owns this repository. Disconnect its active successor before reconnecting this publisher.", 409)
@@ -125,8 +129,8 @@ func (s *Server) publisherReconnect(w http.ResponseWriter, r *http.Request) {
 	authJSON(w, 200, map[string]any{"connection": connectionView(state.Connections[index])})
 }
 
-// Removal forgets only the local disconnected record. Publications, federation,
-// workflows and repository configuration belong to their own lifecycles.
+// Removal forgets the local disconnected record only after fresh workflow
+// verification and an administrator's scoped Tailscale revocation attestation.
 func (s *Server) publisherRemove(w http.ResponseWriter, r *http.Request) {
 	m, ok := s.publisherAdmin(w, r)
 	if !ok {
@@ -149,6 +153,17 @@ func (s *Server) publisherRemove(w http.ResponseWriter, r *http.Request) {
 		}
 		if c.RemoteDisablePending {
 			http.Error(w, "GitHub cleanup is pending. Retry disconnect to verify notifications are disabled before removing this publisher.", 409)
+			return
+		}
+		if c.Deletion == nil || !c.Deletion.WorkflowVerified || !c.Deletion.TailscaleConfirmed || c.Deletion.TailscaleApproval != deletionTailnetApproval(state, c) {
+			http.Error(w, "Complete workflow cleanup and confirm current Tailscale access revocation before deleting this publisher", 409)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+		defer cancel()
+		plan, err := m.removalPlan(ctx, &state, i)
+		if err != nil || !plan.WorkflowVerified || !plan.TailscaleConfirmed {
+			http.Error(w, "Cannot verify current workflow cleanup or Tailscale confirmation. Refresh the deletion review before retrying.", 409)
 			return
 		}
 		state.Connections = append(state.Connections[:i], state.Connections[i+1:]...)

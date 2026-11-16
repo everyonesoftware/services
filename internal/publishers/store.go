@@ -40,6 +40,17 @@ type Repository struct {
 	InstallationID int64  `json:"installationId"`
 }
 
+// Deletion stores private progress and the exact reviewed manual attestation.
+type Deletion struct {
+	PRURL              string
+	WorkflowVerified   bool
+	TailscaleConfirmed bool
+	// Historical attestation remains true even when its current deletion proof expires.
+	TailscaleRevocationAttested bool
+	// Approval binds the manual attestation to the exact saved tailnet and scope.
+	TailscaleApproval string
+}
+
 // Connection is a private record. Never serialize it directly to an API response.
 type Connection struct {
 	ID                   string
@@ -60,6 +71,7 @@ type Connection struct {
 	RunID                string
 	Configured           bool
 	RemoteDisablePending bool
+	Deletion             *Deletion
 	// Receipt ordering belongs to the private connection, not its public JSON view.
 	LastPublicationRunID      string
 	LastPublicationRunAttempt int

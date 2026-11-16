@@ -48,10 +48,22 @@ type publisherConnectionView struct {
 	VerifiedAt           string                         `json:"verifiedAt,omitempty"`
 	LastPublication      *publishers.PublicationReceipt `json:"lastPublication,omitempty"`
 	RemoteDisablePending bool                           `json:"remoteDisablePending,omitempty"`
+	Deletion             *publisherDeletionView         `json:"deletion,omitempty"`
+}
+
+type publisherDeletionView struct {
+	PRURL                       string `json:"prUrl"`
+	WorkflowVerified            bool   `json:"workflowVerified"`
+	TailscaleConfirmed          bool   `json:"tailscaleConfirmed"`
+	TailscaleRevocationAttested bool   `json:"tailscaleRevocationAttested"`
 }
 
 func connectionView(c publishers.Connection) publisherConnectionView {
-	return publisherConnectionView{ID: c.ID, Repository: c.Repository, ImageRepository: c.ImageRepository, State: c.State, Error: c.Error, KeyID: c.KeyID, CreatedAt: c.CreatedAt, VerifiedAt: c.VerifiedAt, LastPublication: c.LastPublication, RemoteDisablePending: c.RemoteDisablePending}
+	view := publisherConnectionView{ID: c.ID, Repository: c.Repository, ImageRepository: c.ImageRepository, State: c.State, Error: c.Error, KeyID: c.KeyID, CreatedAt: c.CreatedAt, VerifiedAt: c.VerifiedAt, LastPublication: c.LastPublication, RemoteDisablePending: c.RemoteDisablePending}
+	if c.Deletion != nil {
+		view.Deletion = &publisherDeletionView{PRURL: c.Deletion.PRURL, WorkflowVerified: c.Deletion.WorkflowVerified, TailscaleConfirmed: c.Deletion.TailscaleConfirmed, TailscaleRevocationAttested: publisherTailscaleRevocationAttested(c)}
+	}
+	return view
 }
 func appCredentials(a publishers.App) githubapp.App {
 	return githubapp.App{ID: a.ID, Slug: a.Slug, Name: a.Name, PEM: a.PEM}
@@ -82,6 +94,10 @@ func (s *Server) registerPublisherRoutes() {
 	s.mux.HandleFunc("POST /api/publishers/{id}/recover", s.publisherRecover)
 	s.mux.HandleFunc("POST /api/publishers/{id}/rotate", s.publisherRotate)
 	s.mux.HandleFunc("POST /api/publishers/{id}/reconnect", s.publisherReconnect)
+	s.mux.HandleFunc("POST /api/publishers/{id}/deletion/plan", s.publisherDeletionReview)
+	s.mux.HandleFunc("POST /api/publishers/{id}/deletion/workflow", s.publisherDeletionWorkflow)
+	s.mux.HandleFunc("POST /api/publishers/{id}/deletion/verify", s.publisherDeletionVerify)
+	s.mux.HandleFunc("POST /api/publishers/{id}/deletion/tailscale", s.publisherDeletionTailscale)
 	s.mux.HandleFunc("DELETE /api/publishers/{id}", s.publisherRemove)
 	s.mux.HandleFunc("POST /api/publishers/{id}/disconnect", s.publisherDisconnect)
 	s.mux.HandleFunc("POST /api/publishers/callback", s.publisherCallback)
@@ -676,6 +692,10 @@ func (s *Server) publisherTest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "This publisher is disconnected", 409)
 			return
 		}
+		if publisherTailscaleRevocationAttested(c) {
+			http.Error(w, "Tailscale revocation was confirmed; complete publisher deletion instead of dispatching a test", 409)
+			return
+		}
 		if !c.Configured || c.Secret == "" {
 			http.Error(w, "GitHub provisioning is incomplete. Automatic recovery of conflicting secrets is not supported yet.", 409)
 			return
@@ -735,7 +755,7 @@ func (s *Server) publisherCallback(w http.ResponseWriter, r *http.Request) {
 		for _, repo := range key.Repositories {
 			allowed = allowed || repo == c.ImageRepository
 		}
-		if !c.Configured || key.ID != c.KeyID || !allowed || len(input.Challenge) != 43 || !matchesHash(input.Challenge, c.ChallengeHash) || c.ChallengeExpires <= time.Now().Unix() || input.SourceRepository != c.Repository.FullName || input.Ref != "refs/heads/"+c.Repository.DefaultBranch || !regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(input.RunID) || (c.ChallengeUsed && c.RunID != input.RunID) {
+		if publisherTailscaleRevocationAttested(*c) || !c.Configured || key.ID != c.KeyID || !allowed || len(input.Challenge) != 43 || !matchesHash(input.Challenge, c.ChallengeHash) || c.ChallengeExpires <= time.Now().Unix() || input.SourceRepository != c.Repository.FullName || input.Ref != "refs/heads/"+c.Repository.DefaultBranch || !regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(input.RunID) || (c.ChallengeUsed && c.RunID != input.RunID) {
 			http.Error(w, "Push challenge is expired or outside the connection's scope", 403)
 			return
 		}

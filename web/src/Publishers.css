@@ -115,6 +115,18 @@
 .publisher-resources h3 { margin-bottom: 14px; }
 .publisher-connections { display: grid; gap: 16px; margin-top: 18px; }
 .publisher-connection-row { min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.publisher-row-heading { display: flex; align-items: center; min-width: 0; }
+.publisher-row-heading .publisher-row-summary { flex: 1; min-width: 0; }
+.publisher-row-delete { flex: none; margin: 12px 16px 12px 0; min-height: 44px; }
+.publisher-confirmation.publisher-deletion { max-width: 760px; }
+.publisher-deletion-steps { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 16px 0; margin: 12px 0 22px; list-style: none; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+.publisher-deletion-steps [aria-current="step"] { color: var(--teal); font-weight: 650; }
+.publisher-deletion-controls { display: grid; gap: 16px; margin-top: 20px; }
+.publisher-deletion-controls label { display: grid; gap: 8px; font-size: 12px; }
+.publisher-deletion-controls input:not([type="checkbox"]), .publisher-deletion-controls select { width: 100%; min-width: 0; min-height: 44px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: inherit; font: inherit; }
+.publisher-deletion .publisher-deletion-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; font-size: 12px; line-height: 1.7; }
+.publisher-deletion-check input { flex: none; width: 18px; height: 18px; margin-top: 3px; accent-color: var(--teal); }
+@media (max-width: 640px) { .publisher-row-heading { align-items: flex-start; } .publisher-row-delete { margin: 12px 10px 12px 0; max-width: 110px; } }
 .publisher-row-summary { width: 100%; min-height: 88px; display: grid; grid-template-columns: minmax(0, 1fr) 200px 130px 16px; align-items: center; gap: 20px; padding: 18px 20px; border: 0; border-radius: 6px; background: var(--surface); color: inherit; text-align: left; }
 .publisher-row-summary:hover { background: #f5f7f1; }
 .publisher-row-summary[aria-expanded="true"] { border-radius: 6px 6px 0 0; background: #f1f5ee; }

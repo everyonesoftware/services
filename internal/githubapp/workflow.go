@@ -16,7 +16,8 @@ import (
 )
 
 // WorkflowFile is an exact, reviewable file change. No repository secrets or
-// variable values are fetched while constructing a plan.
+// variable values are fetched while constructing a plan. Empty After denotes
+// file deletion (empty repository files are not supported by this planner).
 type WorkflowFile struct {
 	Path   string `json:"path"`
 	Before string `json:"before"`
@@ -94,6 +95,10 @@ func supportedSender(s string) bool {
 	return containsAll(withoutComments(s, "//"), "export async function runCli", "['capture', 'send'].includes(args[0])", "if (args[0] === 'capture')", "writeFile(path", "readFile(path", "return sendNotification(", "env.SERVICES_PUBLISH_URL", "env.SERVICES_PUBLISH_TOKEN")
 }
 func (o *operation) planWorkflow(repo Repository, token string) (workflowSnapshot, error) {
+	return o.planWorkflowKind(repo, token, false)
+}
+
+func (o *operation) planWorkflowKind(repo Repository, token string, removal bool) (workflowSnapshot, error) {
 	s := workflowSnapshot{plan: WorkflowPlan{Problems: []string{}, Files: []WorkflowFile{}}}
 	ref, status, err := o.workflowRef(repo, token, repo.DefaultBranch)
 	if err != nil {
@@ -121,6 +126,9 @@ func (o *operation) planWorkflow(repo Repository, token string) (workflowSnapsho
 	status, err = o.request("GET", base+"/contents/.github/workflows?ref="+s.sha, token, nil, &entries, 200, 404)
 	if err != nil {
 		return s, err
+	}
+	if removal && (o.next || (status == 200 && entries == nil)) {
+		return s, errors.New("GitHub workflow directory listing is incomplete")
 	}
 	if len(entries) > 80 {
 		return s, errors.New("GitHub workflow count exceeds supported limit")
@@ -150,6 +158,9 @@ func (o *operation) planWorkflow(repo Repository, token string) (workflowSnapsho
 		s.plan.Problems = append(s.plan.Problems, message)
 		s.plan.Files = []WorkflowFile{}
 		return s, nil
+	}
+	if removal {
+		return planRemovalSnapshot(repo, s, paths, files)
 	}
 	hooks := 0
 	for _, path := range paths {

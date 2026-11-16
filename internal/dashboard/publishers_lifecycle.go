@@ -50,6 +50,10 @@ func (s *Server) publisherAction(w http.ResponseWriter, r *http.Request, action 
 		return
 	}
 	c := &state.Connections[index]
+	if action != "disconnect" && publisherTailscaleRevocationAttested(*c) {
+		http.Error(w, "Tailscale revocation was confirmed; complete publisher deletion instead of restoring notification configuration", 409)
+		return
+	}
 	if c.State == "disconnected" && action != "disconnect" {
 		http.Error(w, "This publisher is disconnected", 409)
 		return

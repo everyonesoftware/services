@@ -10,6 +10,22 @@ const api = await server.ssrLoadModule('/src/publisherApi.ts').catch(() => ({}))
 const ui = await server.ssrLoadModule('/src/Publishers.tsx').catch(() => ({}))
 const repository = { id: 14, fullName: 'Acme/Website', defaultBranch: 'main', installationId: 8 }
 
+test('deletion requests bind exact connection, reviewed fingerprint and manual credential attestation', async () => {
+  const calls = []
+  const client = api.createPublisherApi(async (url, options) => { calls.push([url, options.method, JSON.parse(options.body)]); return Response.json({ workflowVerified: false }) })
+  assert.equal(typeof client.deletionPlan, 'function')
+  await client.deletionPlan('saved/key')
+  await client.deletionWorkflow('saved/key', 'exact-fingerprint')
+  await client.deletionVerify('saved/key')
+  await client.deletionTailscale('saved/key', { confirmed: true, clientId: 'saved-client', scope: 'repository', reviewFingerprint: 'exact-tailnet-review' })
+  assert.deepEqual(calls, [
+    ['/api/publishers/saved%2Fkey/deletion/plan', 'POST', {}],
+    ['/api/publishers/saved%2Fkey/deletion/workflow', 'POST', { fingerprint: 'exact-fingerprint' }],
+    ['/api/publishers/saved%2Fkey/deletion/verify', 'POST', {}],
+    ['/api/publishers/saved%2Fkey/deletion/tailscale', 'POST', { confirmed: true, clientId: 'saved-client', scope: 'repository', reviewFingerprint: 'exact-tailnet-review' }],
+  ])
+})
+
 test('Tailscale setup explains a repository-specific trust with exact fetched subject and safe links', () => {
   assert.equal(typeof ui.PublisherTailscale, 'function')
   const guidance = { issuer: 'https://token.actions.githubusercontent.com', subject: 'repo:Acme@42/Website@14:ref:refs/heads/main', tailnet: { clientId: '', audience: '', tags: '' } }
@@ -502,7 +518,7 @@ test('verified connections render only actual publication metadata and a reposit
   for (const state of ['configured', 'awaiting_callback', 'error', 'disconnected']) assert.doesNotMatch(render({ ...connection, state }), /Latest publication|Receiving publications/)
 })
 
-test('connection management exposes recovery for errors and reconnect/remove for disconnected connections', () => {
+test('connection management exposes recovery and reconnect but leaves deletion to the row wizard', () => {
   const connection = { id: 'saved', state: 'error', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '2026-01-01T00:00:00Z' }
   const props = { busy: false, onTest() {}, onRecover() {}, onManage() {} }
   const error = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection }))
@@ -514,7 +530,7 @@ test('connection management exposes recovery for errors and reconnect/remove for
   assert.doesNotMatch(verified, /Repair &amp; retry/)
   const disconnected = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection: { ...connection, state: 'disconnected' } }))
   assert.match(disconnected, />Reconnect</)
-  assert.match(disconnected, />Remove</)
+  assert.doesNotMatch(disconnected, />Remove</)
   assert.doesNotMatch(disconnected, />Disconnect<|>Rotate key<|Retry push test/)
 })
 
@@ -537,10 +553,10 @@ test('disconnected buttons target their own connection and respect busy state', 
   const elements = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(elements) : [node, ...elements(node.props?.children)]
   const props = { connection, busy: false, onTest() {}, onManage: (target, action) => calls.push([target.id, action]) }
   const buttons = elements(ui.PublisherConnection(props)).filter(node => node.type === 'button')
-  assert.deepEqual(buttons.map(node => node.props.children), ['Reconnect', 'Remove'])
+  assert.deepEqual(buttons.map(node => node.props.children), ['Reconnect'])
   assert.deepEqual(calls, [])
   buttons.forEach(button => button.props.onClick())
-  assert.deepEqual(calls, [['old/key', 'reconnect'], ['old/key', 'remove']])
+  assert.deepEqual(calls, [['old/key', 'reconnect']])
   assert.ok(elements(ui.PublisherConnection({ ...props, busy: true })).filter(node => node.type === 'button').every(node => node.props.disabled))
 })
 
@@ -559,14 +575,27 @@ test('reconnect and remove API calls use encoded targets and explicit mutation m
   assert.deepEqual(calls, [['/api/publishers/old%2Fkey/reconnect', 'POST', '{}'], ['/api/publishers/old%2Fkey', 'DELETE', '{}']])
 })
 
-test('reconnect and remove confirmations explain new credentials and local-only removal', () => {
+test('reconnect confirmation explains new credentials and explicit approval', () => {
   const connection = { id: 'saved', state: 'disconnected', repository, imageRepository: 'ghcr.io/acme/custom', createdAt: '' }
-  for (const [action, label] of [['reconnect', 'Reconnect &amp; test push'], ['remove', 'Remove publisher']]) {
+  for (const [action, label] of [['reconnect', 'Reconnect &amp; test push']]) {
     const html = renderToStaticMarkup(createElement(ui.PublisherConfirmation, { connection, action, busy: false, onCancel() {}, onConfirm() {} }))
     assert.ok(html.includes(label))
     assert.ok(html.indexOf('>Cancel<') < html.indexOf(`>${label}<`))
-    if (action === 'reconnect') { assert.match(html, /fresh credential/i); assert.match(html, /authenticated callback/i); assert.match(html, /replace.*GitHub.*secret/i) }
-    else { assert.match(html, /Historical publications.*remain/i); assert.match(html, /GitHub.*Tailscale.*not.*deleted/i); assert.match(html, /cleanup.*pending/i) }
+    assert.match(html, /fresh credential/i)
+    assert.match(html, /authenticated callback/i)
+    assert.match(html, /replace.*GitHub.*secret/i)
+  }
+})
+
+test('manual Tailscale attestation hides activation actions but retains emergency disconnect and cleanup retry', () => {
+  const props = { busy: false, onTest() {}, onRecover() {}, onManage() {} }
+  for (const deletion of [{ prUrl: '', workflowVerified: true, tailscaleConfirmed: true }, { prUrl: '', workflowVerified: false, tailscaleConfirmed: false, tailscaleRevocationAttested: true }]) {
+    for (const state of ['verified', 'error', 'configured', 'awaiting_callback', 'disconnected']) {
+      const html = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection: { id: 'saved', repository, imageRepository: 'ghcr.io/acme/custom', state, createdAt: '', remoteDisablePending: true, deletion } }))
+      assert.doesNotMatch(html, />Test push<|>Rotate key<|>Reconnect<|>Repair &amp; retry push<|>Retry push test</)
+      assert.match(html, /Manual Tailscale confirmation is saved/)
+      assert.match(html, state === 'disconnected' ? />Retry GitHub cleanup</ : />Disconnect</)
+    }
   }
 })
 

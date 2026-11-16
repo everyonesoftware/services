@@ -9,6 +9,7 @@ export type Connection = {
   state: 'configured' | 'awaiting_callback' | 'verified' | 'error' | 'disconnected'
   error?: string; keyId?: string; createdAt: string; verifiedAt?: string
   remoteDisablePending?: boolean
+  deletion?: { prUrl: string; workflowVerified: boolean; tailscaleConfirmed: boolean; tailscaleRevocationAttested?: boolean }
   lastPublication?: Publication
 }
 export type PublisherStatus = {
@@ -25,6 +26,12 @@ export type PublisherPlan = {
   workflow?: { supported: boolean; problems: string[]; files: { path: string; before: string; after: string }[]; fingerprint: string }
 }
 export type GitHubStart = { action: string; manifest: string }
+export type DeletionPlan = {
+  workflow: NonNullable<PublisherPlan['workflow']>
+  prUrl: string; workflowVerified: boolean; tailscaleConfirmed: boolean
+  tailscaleReview: string
+  tailscale: Tailnet & { shared: boolean; credentialsUrl: string }
+}
 
 export function githubVariablesReady(github: PublisherStatus['github']) {
   return github.connected === true && github.permissionsChecked === true && github.variablesWrite === true
@@ -136,6 +143,10 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
     disconnect: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/disconnect`, 'POST', {}),
     reconnect: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/reconnect`, 'POST', {}),
     remove: (id: string) => request<{ removed: boolean }>(`/${encodeURIComponent(id)}`, 'DELETE', {}),
+    deletionPlan: (id: string) => request<DeletionPlan>(`/${encodeURIComponent(id)}/deletion/plan`, 'POST', {}),
+    deletionWorkflow: (id: string, fingerprint: string) => request<DeletionPlan>(`/${encodeURIComponent(id)}/deletion/workflow`, 'POST', { fingerprint }),
+    deletionVerify: (id: string) => request<DeletionPlan>(`/${encodeURIComponent(id)}/deletion/verify`, 'POST', {}),
+    deletionTailscale: (id: string, body: { confirmed: true; clientId: string; scope: 'dedicated' | 'repository'; reviewFingerprint: string }) => request<DeletionPlan>(`/${encodeURIComponent(id)}/deletion/tailscale`, 'POST', body),
     rotate: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/rotate`, 'POST', {}),
     recover: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/recover`, 'POST', {}),
   }
