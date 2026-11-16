@@ -79,6 +79,78 @@ func TestPublisherDeletionResolvesChangedDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestPublisherDeletionResolvesRenamedRepository(t *testing.T) {
+	s, store, p, cookie, c := deletionTestServer(t)
+	p.repositories[0].FullName = "acme/renamed-app"
+	p.repositories[0].DefaultBranch = "trunk"
+	path := "/api/publishers/" + c.ID
+	p.removal.Files = []githubapp.WorkflowFile{{Path: ".github/workflows/publish.yml", Before: "build and notify", After: "build"}}
+	w := publisherRequest(s, "POST", path+"/deletion/plan", map[string]any{}, cookie, "")
+	if w.Code != 200 {
+		t.Fatalf("renamed repository blocked: %d %s", w.Code, w.Body.String())
+	}
+	if p.plannedRepository != p.repositories[0] {
+		t.Fatalf("inspected stale repository: %+v", p.plannedRepository)
+	}
+	saved, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Connections[0].Repository != storedRepository(p.repositories[0]) || saved.Connections[0].ImageRepository != c.ImageRepository {
+		t.Fatalf("rename was not saved independently of image identity: %+v", saved.Connections[0])
+	}
+	if w = publisherRequest(s, "POST", path+"/deletion/workflow", map[string]any{"fingerprint": p.removal.Fingerprint}, cookie, ""); w.Code != 201 {
+		t.Fatalf("cleanup PR for renamed repository: %d %s", w.Code, w.Body.String())
+	}
+	if p.removedRepository != p.repositories[0] || !strings.Contains(w.Body.String(), "https://github.com/acme/renamed-app/pull/42") {
+		t.Fatalf("cleanup targeted stale repository: %+v %s", p.removedRepository, w.Body.String())
+	}
+	p.removal.Files = []githubapp.WorkflowFile{}
+	if w = publisherRequest(s, "POST", path+"/deletion/verify", map[string]any{}, cookie, ""); w.Code != 200 {
+		t.Fatalf("verify renamed cleanup: %d %s", w.Code, w.Body.String())
+	}
+	if w = publisherRequest(s, "POST", path+"/deletion/tailscale", deletionAttestationFromReview(t, s, c.ID, cookie, "dedicated"), cookie, ""); w.Code != 200 {
+		t.Fatalf("confirm renamed cleanup: %d %s", w.Code, w.Body.String())
+	}
+	if w = publisherRequest(s, "POST", path+"/disconnect", map[string]any{}, cookie, ""); w.Code != 200 {
+		t.Fatalf("disconnect renamed publisher: %d %s", w.Code, w.Body.String())
+	}
+	if w = publisherRequest(s, "DELETE", path, nil, cookie, ""); w.Code != 200 {
+		t.Fatalf("delete renamed publisher: %d %s", w.Code, w.Body.String())
+	}
+	saved, err = store.Load()
+	if err != nil || len(saved.Connections) != 0 {
+		t.Fatalf("renamed publisher retained: %+v %v", saved.Connections, err)
+	}
+}
+
+func TestPublisherDeletionRejectsReplacementRepositoryOrInstallation(t *testing.T) {
+	for _, changed := range []string{"repository", "installation"} {
+		t.Run(changed, func(t *testing.T) {
+			s, _, p, cookie, c := deletionTestServer(t)
+			if changed == "repository" {
+				p.repositories[0].ID++
+			} else {
+				p.repositories[0].InstallationID++
+			}
+			w := publisherRequest(s, "POST", "/api/publishers/"+c.ID+"/deletion/plan", map[string]any{}, cookie, "")
+			if w.Code != 409 || p.plannedRepository.ID != 0 || p.removeCalls != 0 {
+				t.Fatalf("replacement identity accepted: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestPublisherDeletionRenameInvalidatesOldAttestation(t *testing.T) {
+	s, _, p, cookie, c := deletionTestServer(t)
+	body := deletionAttestationFromReview(t, s, c.ID, cookie, "dedicated")
+	p.repositories[0].FullName = "acme/renamed-app"
+	w := publisherRequest(s, "POST", "/api/publishers/"+c.ID+"/deletion/tailscale", body, cookie, "")
+	if w.Code != 409 {
+		t.Fatalf("old-name attestation accepted: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPublisherDeletionRevocationHistoryBlocksLateCallback(t *testing.T) {
 	s, _, p, cookie, c := deletionTestServer(t)
 	body := deletionAttestationFromReview(t, s, c.ID, cookie, "dedicated")

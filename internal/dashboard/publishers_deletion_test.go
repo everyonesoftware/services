@@ -16,18 +16,20 @@ type deletionProvider struct {
 	removeErr         error
 	removeCalls       int
 	plannedRepository githubapp.Repository
+	removedRepository githubapp.Repository
 }
 
 func (p *deletionProvider) PlanWorkflowRemoval(_ context.Context, _ githubapp.App, repo githubapp.Repository) (githubapp.WorkflowPlan, error) {
 	p.plannedRepository = repo
 	return p.removal, p.removalErr
 }
-func (p *deletionProvider) RemoveWorkflow(_ context.Context, _ githubapp.App, _ githubapp.Repository, fingerprint string) (string, error) {
+func (p *deletionProvider) RemoveWorkflow(_ context.Context, _ githubapp.App, repo githubapp.Repository, fingerprint string) (string, error) {
 	p.removeCalls++
+	p.removedRepository = repo
 	if fingerprint != p.removal.Fingerprint {
 		return "", githubapp.ErrConflict
 	}
-	return "https://github.com/acme/app/pull/42", p.removeErr
+	return "https://github.com/" + repo.FullName + "/pull/42", p.removeErr
 }
 func TestPublisherDeletionReviewDoesNotMutateRemoteOrRevokeKeys(t *testing.T) {
 	s, keys, store, base, cookie := publisherServer(t)

@@ -67,7 +67,7 @@ func (m *publisherIntegration) removalPlan(ctx context.Context, state *publisher
 	if err != nil {
 		return publisherDeletionPlan{}, err
 	}
-	// Branch identity is fresh metadata, not authorization. Persist it with the
+	// Repository name and branch are fresh metadata, not identity. Persist them with the
 	// deletion review and bind manual confirmation to that exact reviewed state.
 	state.Connections[index].Repository = storedRepository(repo)
 	c = state.Connections[index]
@@ -95,14 +95,16 @@ func (m *publisherIntegration) resolveDeletionRepository(ctx context.Context, st
 		return githubapp.Repository{}, errors.New("Cannot verify GitHub repository access")
 	}
 	for _, repo := range repos {
-		if repo.ID == input.ID && repo.FullName == input.FullName && repo.InstallationID == input.InstallationID {
+		// A rename must not strand cleanup. Bind access to the stable repository
+		// and installation IDs, then use GitHub's current name for every operation.
+		if repo.ID == input.ID && repo.InstallationID == input.InstallationID {
 			if err := m.provider.VerifyRepositoryPermissions(ctx, appCredentials(state.App), repo); err != nil {
 				return githubapp.Repository{}, err
 			}
 			return repo, nil
 		}
 	}
-	return githubapp.Repository{}, errors.New("Repository or installation is not currently authorized for workflow cleanup")
+	return githubapp.Repository{}, errors.New("The configured GitHub App cannot access this publisher's saved repository ID through its original installation; restore repository access before retrying workflow cleanup")
 }
 
 func deletionTailnetApproval(state publishers.Snapshot, c publishers.Connection) string {
