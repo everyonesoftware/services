@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/build-pwa.mjs",
+    "build": "tsc -b && vite build && node scripts/build-web.mjs",
     "test": "node --test src/*.test.js",
     "test:publisher-deletion": "node tests/publisher-deletion.browser.mjs",
     "test:logs": "node --test src/logs.test.js && node tests/logs.browser.mjs",

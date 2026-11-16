@@ -1,4 +1,4 @@
-// Real production bundles and service worker, served from isolated build copies.
+// Real production browser-only bundles, served from isolated build copies.
 // Only authenticated API reads are browser fixtures; no Docker/provider writes.
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -6,7 +6,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, extname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { buildPwa } from '../scripts/build-pwa.mjs'
+import { buildWeb } from '../scripts/build-web.mjs'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const directory = await mkdtemp(join(process.env.TMPDIR || tmpdir(), 'services-webapp-update-'))
 const screenshots = process.env.WEBAPP_SCREENSHOT_DIR
@@ -14,14 +14,14 @@ if (screenshots) await mkdir(screenshots, {recursive:true})
 const roots = Object.fromEntries(['a','b','c'].map(name=>[name,join(directory,name)]))
 const ids = {}
 for(const name of ['a','b','c']) {
-  await cp(fileURLToPath(new URL('../dist',import.meta.url)), roots[name], {recursive:true})
+  await cp(process.env.WEB_DIST_DIR||fileURLToPath(new URL('../dist',import.meta.url)), roots[name], {recursive:true})
   if(name !== 'a') {
     let html = await readFile(join(roots[name],'index.html'),'utf8')
     html = html.replace('</head>',`<link rel="stylesheet" href="/assets/update-proof.css"><meta name="fixture-build" content="${name}"></head>`)
     await writeFile(join(roots[name],'index.html'),html)
     await writeFile(join(roots[name],'assets/update-proof.css'),`:root { --fixture-build: ${name}; }`)
   }
-  await buildPwa(roots[name])
+  await buildWeb(roots[name])
   ids[name] = JSON.parse(await readFile(join(roots[name],'web-build.json'),'utf8')).id
 }
 assert.notEqual(ids.a,ids.b); assert.notEqual(ids.b,ids.c)
@@ -58,7 +58,7 @@ const server=createServer(async(req,res)=>{
 })
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
 const origin=`http://127.0.0.1:${server.address().port}`
-const browser=await chromium.launch({channel:process.env.BROWSER_CHANNEL||'msedge',headless:true})
+const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM?{executablePath:process.env.CHROMIUM}:process.env.PLAYWRIGHT_CHANNEL||process.env.BROWSER_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL||process.env.BROWSER_CHANNEL}:{})})
 try {
   for(const viewport of [{width:1440,height:900},{width:390,height:844},{width:320,height:560}]) {
     serving='a';metadataMode='valid';delay=0;requests.length=0;writes.length=0
@@ -69,9 +69,7 @@ try {
     await page.goto(`${origin}/#monitor`)
     await page.getByRole('link',{name:'Settings',exact:true}).click()
     await page.getByRole('heading',{name:'Web app updates',exact:true}).waitFor()
-    await page.evaluate(async()=>{
-      await navigator.serviceWorker.ready
-      if(!navigator.serviceWorker.controller) await new Promise(resolve=>navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true}))
+    await page.evaluate(()=>{
       window.__updateMarker='unchanged'
     })
     const panel=page.locator('.webapp-update-card')
@@ -150,15 +148,13 @@ try {
     assert.equal(await page.evaluate(()=>location.hash),'#settings')
     await check.click();await status('You’re up to date').waitFor()
     await capture('updated')
-    const cache=await page.evaluate(async()=>{
-      const entries=[]
-      for(const key of await caches.keys())entries.push({key,paths:(await(await caches.open(key)).keys()).map(req=>new URL(req.url).pathname)})
-      return entries
-    })
-    assert.equal(cache.length,1);assert.match(cache[0].key,/^services-offline-/);assert.deepEqual(cache[0].paths,['/offline.html'])
+    assert.deepEqual(await page.evaluate(async()=>({
+      caches:await caches.keys(),
+      workers:(await navigator.serviceWorker.getRegistrations()).map(reg=>reg.scope),
+    })),{caches:[],workers:[]},'Manual Settings updates must not create caches or workers')
     assert.deepEqual(writes,[],'Web app updates must never invoke a mutation endpoint')
     assert.deepEqual(errors,[])
-    console.log(`PASS production web app ${viewport.width}x${viewport.height}: current ${ids.a} -> ${ids.c}; manual uncached checks, errors/offline/retry, Later/Escape/draft/focus, stale target and rollback preflight, real reload/new CSS, offline-only cache; zero backend mutations`)
+    console.log(`PASS production web app ${viewport.width}x${viewport.height}: current ${ids.a} -> ${ids.c}; manual uncached checks, errors/offline/retry, Later/Escape/draft/focus, stale target and rollback preflight, real reload/new CSS; no caches/workers or backend mutations`)
     await context.close()
   }
 } finally {

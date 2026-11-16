@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import { AuthGate } from './AuthGate.tsx'
-import { registerPwa } from './registerPwa.ts'
+import { retirePwa } from './retirePwa.ts'
 import './Mobile.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -11,6 +11,6 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-if (import.meta.env.PROD && window.isSecureContext && 'serviceWorker' in navigator) {
-  void registerPwa(navigator.serviceWorker)
+if (window.isSecureContext) {
+  void retirePwa(navigator.serviceWorker, window.caches, window.location.origin)
 }

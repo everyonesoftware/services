@@ -153,9 +153,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	// Revalidate install resources and HTML without changing API or asset caching.
+	// Revalidate HTML and the legacy worker retirement endpoint.
 	switch r.URL.Path {
-	case "/", "/index.html", "/sw.js", "/manifest.webmanifest", "/offline.html":
+	case "/", "/index.html", "/sw.js":
 		w.Header().Set("Cache-Control", "no-cache")
 	}
 	// Revalidate build metadata for reads without changing other static policies.

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPWAStaticResponsesRevalidate(t *testing.T) {
+func TestHTMLBuildAndRetirementResponsesRevalidate(t *testing.T) {
 	// Chdir is restored by testing and cannot run alongside parallel tests.
 	// This fixture never depends on the frontend build in web/dist.
 	dir := t.TempDir()
@@ -17,7 +17,7 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 	if err := os.MkdirAll(dist, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"index.html", "sw.js", "manifest.webmanifest", "offline.html", "web-build.json"} {
+	for _, name := range []string{"index.html", "sw.js", "web-build.json"} {
 		if err := os.WriteFile(filepath.Join(dist, name), []byte("fixture: "+name), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -25,7 +25,7 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 	t.Chdir(dir)
 	s, _ := securedServer(t)
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		for _, path := range []string{"/", "/index.html", "/sw.js", "/manifest.webmanifest", "/offline.html", "/sw.js?version=2", "/web-build.json", "/web-build.json?version=2"} {
+		for _, path := range []string{"/", "/index.html", "/sw.js", "/sw.js?version=2", "/web-build.json", "/web-build.json?version=2"} {
 			t.Run(method+" "+path, func(t *testing.T) {
 				w := httptest.NewRecorder()
 				s.ServeHTTP(w, httptest.NewRequest(method, path, nil))
@@ -57,7 +57,7 @@ func TestPWAStaticResponsesRevalidate(t *testing.T) {
 	}
 }
 
-func TestPWACachePolicyLeavesOtherStaticPathsUnchanged(t *testing.T) {
+func TestHTMLCachePolicyLeavesOtherStaticPathsUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	paths := []string{"/assets/app.js", "/nested/sw.js", "/sw.js.map", "/manifest.webmanifest.bak", "/offline.html.bak", "/nested/web-build.json", "/web-build.json.bak"}
 	for _, path := range paths {
@@ -87,7 +87,7 @@ func TestPWACachePolicyLeavesOtherStaticPathsUnchanged(t *testing.T) {
 	}
 }
 
-func TestPWACachePolicyPreservesAPIAuthentication(t *testing.T) {
+func TestHTMLCachePolicyPreservesAPIAuthentication(t *testing.T) {
 	s, _ := securedServer(t)
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		for _, path := range []string{"/api/projects", "/api/version", "/api/icons/images/sw.js", "/api/unknown", "/api/projects?asset=/sw.js", "/api/web-build.json", "/api/projects?asset=/web-build.json"} {
