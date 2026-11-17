@@ -38,6 +38,8 @@ type publisherIntegration struct {
 	endpoint string
 }
 type publisherConnectionView struct {
+	Configured           bool                           `json:"configured"`
+	CredentialAvailable  bool                           `json:"credentialAvailable"`
 	ID                   string                         `json:"id"`
 	Repository           publishers.Repository          `json:"repository"`
 	ImageRepository      string                         `json:"imageRepository"`
@@ -59,12 +61,32 @@ type publisherDeletionView struct {
 }
 
 func connectionView(c publishers.Connection) publisherConnectionView {
-	view := publisherConnectionView{ID: c.ID, Repository: c.Repository, ImageRepository: c.ImageRepository, State: c.State, Error: c.Error, KeyID: c.KeyID, CreatedAt: c.CreatedAt, VerifiedAt: c.VerifiedAt, LastPublication: c.LastPublication, RemoteDisablePending: c.RemoteDisablePending}
+	view := publisherConnectionView{Configured: c.Configured, ID: c.ID, Repository: c.Repository, ImageRepository: c.ImageRepository, State: c.State, Error: c.Error, KeyID: c.KeyID, CreatedAt: c.CreatedAt, VerifiedAt: c.VerifiedAt, LastPublication: c.LastPublication, RemoteDisablePending: c.RemoteDisablePending}
 	if c.Deletion != nil {
 		view.Deletion = &publisherDeletionView{PRURL: c.Deletion.PRURL, WorkflowVerified: c.Deletion.WorkflowVerified, TailscaleConfirmed: c.Deletion.TailscaleConfirmed, TailscaleRevocationAttested: publisherTailscaleRevocationAttested(c)}
 	}
 	return view
 }
+func publisherCredentialMatches(key auth.APIKey, c publishers.Connection) bool {
+	return key.ID == c.KeyID && len(key.Scopes) == 1 && key.Scopes[0] == "publications:write" && len(key.Repositories) == 1 && key.Repositories[0] == c.ImageRepository
+}
+
+func (s *Server) connectionView(c publishers.Connection) publisherConnectionView {
+	view := connectionView(c)
+	keys, err := s.authStore.ListKeys()
+	if err != nil || c.Secret == "" {
+		return view
+	}
+	for _, key := range keys {
+		expires, parseErr := time.Parse(time.RFC3339, key.ExpiresAt)
+		if publisherCredentialMatches(key, c) && strings.HasPrefix(c.Secret, key.Prefix) && (key.ExpiresAt == "" || (parseErr == nil && expires.After(time.Now()))) {
+			view.CredentialAvailable = true
+			break
+		}
+	}
+	return view
+}
+
 func appCredentials(a publishers.App) githubapp.App {
 	return githubapp.App{ID: a.ID, Slug: a.Slug, Name: a.Name, PEM: a.PEM}
 }
@@ -91,6 +113,8 @@ func (s *Server) registerPublisherRoutes() {
 	s.mux.HandleFunc("POST /api/publishers/workflow", s.publisherInstallWorkflow)
 	s.mux.HandleFunc("POST /api/publishers", s.publisherCreate)
 	s.mux.HandleFunc("POST /api/publishers/{id}/test", s.publisherTest)
+	s.mux.HandleFunc("POST /api/publishers/{id}/repair/plan", s.publisherRepairReview)
+	s.mux.HandleFunc("POST /api/publishers/{id}/repair", s.publisherRepair)
 	s.mux.HandleFunc("POST /api/publishers/{id}/recover", s.publisherRecover)
 	s.mux.HandleFunc("POST /api/publishers/{id}/rotate", s.publisherRotate)
 	s.mux.HandleFunc("POST /api/publishers/{id}/reconnect", s.publisherReconnect)
@@ -179,13 +203,13 @@ func (s *Server) publisherStatus(w http.ResponseWriter, r *http.Request) {
 		c := &state.Connections[i]
 		if c.State == "configured" && !c.Configured {
 			c.State = "error"
-			c.Error = "Provisioning was interrupted. Recover setup to reconcile the saved configuration before testing."
+			c.Error = "Provisioning was interrupted. Use reviewed repair to reconcile the saved configuration before testing."
 			changed = true
 		}
 		if c.State != "disconnected" && c.Secret != "" {
 			if !activeKeys[c.KeyID] {
 				c.State = "error"
-				c.Error = "Publisher key was revoked or expired. Rotate the key before retrying."
+				c.Error = "Publisher key was revoked or expired. Use reviewed repair to create a fresh credential and reconcile GitHub settings."
 				c.VerifiedAt = ""
 				changed = true
 			}
@@ -195,7 +219,7 @@ func (s *Server) publisherStatus(w http.ResponseWriter, r *http.Request) {
 			c.Error = "No callback received before the test expired. Check the workflow run and Tailscale access, then retry."
 			changed = true
 		}
-		views = append(views, connectionView(*c))
+		views = append(views, s.connectionView(*c))
 	}
 	if changed {
 		if err = m.store.Save(state); err != nil {
@@ -567,7 +591,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, c := range state.Connections {
 		if c.Repository.ID == repo.ID && c.State != "disconnected" {
-			http.Error(w, "This repository already has a saved connection. Use its test action; provisioning failures require reviewing GitHub configuration before recovery.", 409)
+			http.Error(w, "This repository already has a saved connection. Use its test action or reviewed repair for provisioning failures.", 409)
 			return
 		}
 	}
@@ -615,9 +639,9 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err = m.provider.Configure(ctx, appCredentials(state.App), repo, secret, m.variables(state, repo)); err != nil {
 		state.Connections[index].State = "error"
-		state.Connections[index].Error = "GitHub provisioning was not completed. Recover setup to reconcile missing configuration without overwriting existing values."
+		state.Connections[index].Error = "GitHub provisioning was not completed. Use reviewed repair to approve and reconcile repository configuration."
 		if errors.Is(err, githubapp.ErrConflict) {
-			state.Connections[index].Error = "GitHub configuration conflicts with existing settings. No conflicting value was overwritten. Disconnect this setup and review the repository configuration."
+			state.Connections[index].Error = "GitHub configuration conflicts with existing settings. No conflicting value was overwritten. Use reviewed repair to approve replacing publisher settings and delivering a fresh credential."
 			if revokeErr := s.authStore.RevokeKey(key.ID); revokeErr != nil {
 				http.Error(w, "Cannot revoke the failed setup credential. Revoke it from Accounts before retrying.", 503)
 				return
@@ -628,7 +652,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Cannot persist failed provisioning status. Review saved setup before retrying.", 503)
 			return
 		}
-		http.Error(w, "GitHub configuration was not completed. Existing secrets are never overwritten. Review the saved connection and repository settings before recovery.", 409)
+		http.Error(w, "GitHub configuration was not completed. New setup never overwrites existing secrets. Use reviewed repair on the saved connection to approve reconciliation.", 409)
 		return
 	}
 	state.Connections[index].Configured = true
@@ -640,7 +664,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Connection was saved, but the test could not be dispatched. Retry from the connection card.", 502)
 		return
 	}
-	authJSON(w, 201, map[string]any{"connection": connectionView(state.Connections[index])})
+	authJSON(w, 201, map[string]any{"connection": s.connectionView(state.Connections[index])})
 }
 func (m *publisherIntegration) dispatch(ctx context.Context, state *publishers.Snapshot, index int) error {
 	c := &state.Connections[index]
@@ -697,11 +721,11 @@ func (s *Server) publisherTest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !c.Configured || c.Secret == "" {
-			http.Error(w, "GitHub provisioning is incomplete. Automatic recovery of conflicting secrets is not supported yet.", 409)
+			http.Error(w, "GitHub provisioning is incomplete. Use reviewed repair to approve and reconcile publisher settings.", 409)
 			return
 		}
 		if _, err = s.authStore.AuthenticateKey(c.Secret); err != nil {
-			http.Error(w, "Publisher key was revoked or expired. Reprovisioning is required.", 409)
+			http.Error(w, "Publisher key was revoked or expired. Use reviewed repair to create a fresh credential.", 409)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
@@ -710,7 +734,7 @@ func (s *Server) publisherTest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Cannot dispatch connection test; inspect the saved status and GitHub Actions", 502)
 			return
 		}
-		authJSON(w, 200, map[string]any{"connection": connectionView(state.Connections[i])})
+		authJSON(w, 200, map[string]any{"connection": s.connectionView(state.Connections[i])})
 		return
 	}
 	http.NotFound(w, r)

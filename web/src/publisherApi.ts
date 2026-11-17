@@ -8,6 +8,7 @@ export type Connection = {
   id: string; repository: Repository; imageRepository: string
   state: 'configured' | 'awaiting_callback' | 'verified' | 'error' | 'disconnected'
   error?: string; keyId?: string; createdAt: string; verifiedAt?: string
+  configured?: boolean; credentialAvailable?: boolean
   remoteDisablePending?: boolean
   deletion?: { prUrl: string; workflowVerified: boolean; tailscaleConfirmed: boolean; tailscaleRevocationAttested?: boolean }
   lastPublication?: Publication
@@ -24,6 +25,10 @@ export type PublisherPlan = {
   approval?: string
   variables: Record<string, string>; secretName: 'SERVICES_PUBLISH_TOKEN'
   workflow?: { supported: boolean; problems: string[]; files: { path: string; before: string; after: string }[]; fingerprint: string }
+}
+export type RepairPlan = {
+  repository: Repository; imageRepository: string
+  configuration: { variables: { name: string; exists: boolean; currentValue: string; desiredValue: string }[]; secretExists: boolean; fingerprint: string }
 }
 export type GitHubStart = { action: string; manifest: string }
 export type DeletionPlan = {
@@ -52,6 +57,23 @@ function matchesPlan(plan: PublisherPlan, repository: Repository | null, imageRe
     && plan.imageRepository === imageRepository && plan.secretName === 'SERVICES_PUBLISH_TOKEN'
     && plan.repository.id === repository.id && plan.repository.fullName === repository.fullName
     && plan.repository.installationId === repository.installationId && plan.repository.defaultBranch === repository.defaultBranch)
+}
+const repairVariableNames = ['SERVICES_PUBLISH_NOTIFICATIONS', 'SERVICES_PUBLISH_URL', 'TAILSCALE_AUDIENCE', 'TAILSCALE_CLIENT_ID', 'TAILSCALE_TAGS']
+export function canRepairPlan(plan: RepairPlan | null, connection: Connection) {
+  return !!(plan?.repository && plan.imageRepository === connection.imageRepository
+    && plan.repository.id === connection.repository.id && plan.repository.installationId === connection.repository.installationId
+    // Saved names/branches may be stale; the server authorizes fresh metadata by stable ownership.
+    && typeof plan.repository.fullName === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(plan.repository.fullName)
+    && typeof plan.repository.defaultBranch === 'string' && plan.repository.defaultBranch.length > 0 && plan.repository.defaultBranch.length <= 255
+    // eslint-disable-next-line no-control-regex -- Reject control characters in provider display metadata.
+    && !/[\s\x00-\x1f\x7f]/.test(plan.repository.defaultBranch)
+    // Shape validation only: the backend remains the authority for the fingerprint's binding.
+    && typeof plan.configuration?.fingerprint === 'string' && plan.configuration.fingerprint.length === 64 && /^[a-f0-9]{64}$/.test(plan.configuration.fingerprint)
+    && typeof plan.configuration.secretExists === 'boolean' && Array.isArray(plan.configuration.variables)
+    && plan.configuration.variables.length === repairVariableNames.length
+    && plan.configuration.variables.every(item => item && repairVariableNames.includes(item.name) && typeof item.exists === 'boolean' && typeof item.currentValue === 'string' && typeof item.desiredValue === 'string'
+      && (item.name !== 'SERVICES_PUBLISH_NOTIFICATIONS' || item.desiredValue === 'false'))
+    && new Set(plan.configuration.variables.map(item => item.name)).size === repairVariableNames.length)
 }
 export function awaitingCallback(connections: Connection[]) { return connections.some(connection => connection.state === 'awaiting_callback') }
 export function orderPublisherConnections(connections: Connection[]) {
@@ -148,6 +170,8 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
     deletionVerify: (id: string) => request<DeletionPlan>(`/${encodeURIComponent(id)}/deletion/verify`, 'POST', {}),
     deletionTailscale: (id: string, body: { confirmed: true; clientId: string; scope: 'dedicated' | 'repository'; reviewFingerprint: string }) => request<DeletionPlan>(`/${encodeURIComponent(id)}/deletion/tailscale`, 'POST', body),
     rotate: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/rotate`, 'POST', {}),
+    repairPlan: (id: string) => request<RepairPlan>(`/${encodeURIComponent(id)}/repair/plan`, 'POST', {}),
+    repair: (id: string, fingerprint: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/repair`, 'POST', { fingerprint }),
     recover: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/recover`, 'POST', {}),
   }
 }

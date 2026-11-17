@@ -248,7 +248,7 @@ func TestPublisherInterruptedProvisioningBecomesRecoverableAfterRestart(t *testi
 	if err := store.Save(state); err != nil {
 		t.Fatal(err)
 	}
-	if w := publisherRequest(s, "GET", "/api/publishers", nil, cookie, ""); w.Code != 200 || !strings.Contains(w.Body.String(), "Recover setup") {
+	if w := publisherRequest(s, "GET", "/api/publishers", nil, cookie, ""); w.Code != 200 || !strings.Contains(w.Body.String(), "reviewed repair") {
 		t.Fatalf("interrupted setup not recoverable: %d %s", w.Code, w.Body.String())
 	}
 }

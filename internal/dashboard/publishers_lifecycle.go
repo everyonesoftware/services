@@ -109,11 +109,11 @@ func (s *Server) publisherAction(w http.ResponseWriter, r *http.Request, action 
 		}
 	case "recover":
 		if c.Secret == "" {
-			http.Error(w, "This setup has no recoverable credential. Disconnect it and resolve the reported repository conflict before reconnecting.", 409)
+			http.Error(w, "This setup has no recoverable credential. Use reviewed repair to approve repository configuration and create a fresh scoped credential.", 409)
 			return
 		}
 		if _, err = s.authStore.AuthenticateKey(c.Secret); err != nil {
-			http.Error(w, "Saved key was revoked or expired; rotate the key", 409)
+			http.Error(w, "Saved key was revoked or expired; use reviewed repair to create a fresh scoped credential", 409)
 			return
 		}
 		if !c.Configured {
@@ -127,7 +127,7 @@ func (s *Server) publisherAction(w http.ResponseWriter, r *http.Request, action 
 				return
 			}
 			if err = provider.RecoverConfiguration(ctx, appCredentials(state.App), providerRepository(c.Repository), c.Secret, m.variables(state, providerRepository(c.Repository))); err != nil {
-				http.Error(w, "Recovery could not reconcile existing configuration. No existing secret was overwritten.", 409)
+				http.Error(w, "Recovery could not reconcile existing configuration. No existing secret was overwritten. Use reviewed repair to approve replacing publisher settings.", 409)
 				return
 			}
 			c.Configured = true
@@ -142,7 +142,7 @@ func (s *Server) publisherAction(w http.ResponseWriter, r *http.Request, action 
 		}
 	case "rotate":
 		if !c.Configured {
-			http.Error(w, "Complete or recover configuration before rotating its key", 409)
+			http.Error(w, "Use reviewed repair to complete configuration before rotating its key", 409)
 			return
 		}
 		provider, ok := m.provider.(publisherRotationProvider)
@@ -198,7 +198,7 @@ func (s *Server) publisherAction(w http.ResponseWriter, r *http.Request, action 
 			return
 		}
 	}
-	authJSON(w, 200, map[string]any{"connection": connectionView(state.Connections[index])})
+	authJSON(w, 200, map[string]any{"connection": s.connectionView(state.Connections[index])})
 }
 func (s *Server) publisherRecover(w http.ResponseWriter, r *http.Request) {
 	s.publisherAction(w, r, "recover")

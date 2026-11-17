@@ -126,7 +126,7 @@ func (s *Server) publisherReconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Reconnect saved, but test dispatch was not verified; retry the connection test", 502)
 		return
 	}
-	authJSON(w, 200, map[string]any{"connection": connectionView(state.Connections[index])})
+	authJSON(w, 200, map[string]any{"connection": s.connectionView(state.Connections[index])})
 }
 
 // Removal forgets the local disconnected record only after fresh workflow

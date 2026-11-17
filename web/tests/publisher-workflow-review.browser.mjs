@@ -17,7 +17,7 @@ server.middlewares.use('/__workflow_review_fixture', (_req, res) => {
 })
 let browser
 try {
-  browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
+  browser = await chromium.launch({ ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : { channel: process.env.BROWSER_CHANNEL || 'msedge' }), headless: true })
   const page = await browser.newPage()
   for (const width of [1200, 390]) {
     await page.setViewportSize({ width, height: 900 })

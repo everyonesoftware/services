@@ -523,7 +523,7 @@ test('connection management exposes recovery and reconnect but leaves deletion t
   const props = { busy: false, onTest() {}, onRecover() {}, onManage() {} }
   const error = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection }))
   assert.match(error, /Repair &amp; retry push/)
-  assert.match(error, /saved setup.*no duplicate key/i)
+  assert.match(error, /Review publisher repair.*current and desired repository configuration/i)
   assert.match(error, />Disconnect</)
   const verified = renderToStaticMarkup(createElement(ui.PublisherConnection, { ...props, connection: { ...connection, state: 'verified' } }))
   assert.match(verified, />Rotate key</)

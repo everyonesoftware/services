@@ -7,7 +7,7 @@ import { createServer } from '../node_modules/vite/dist/node/index.js'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), server: { host: '127.0.0.1', port: 0, hmr: false } })
 await server.listen()
-const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
+const browser = await chromium.launch({ ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : { channel: process.env.BROWSER_CHANNEL || 'msedge' }), headless: true })
 const page = await browser.newPage({ viewport: { width: 1200, height: 1000 } })
 const errors = [], calls = [], unexpected = []
 let failure = '', hold = null, statusReads = 0
