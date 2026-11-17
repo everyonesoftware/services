@@ -22,7 +22,9 @@ func supportedWorkflowDefaults(root *yaml.Node) bool {
 
 // Preserve an existing repository-wide static serialization group instead of
 // adding a second concurrency key or changing cancellation/queue behavior.
-// Dynamic groups can partition publishers by run/ref, so need manual review.
+// Also recognize Services' own generated group: github.repository is shared
+// by all runs in the repository. Other expressions can partition publishers
+// by run/ref, so still require manual review.
 func supportedExistingConcurrency(root *yaml.Node) bool {
 	concurrency := yamlField(root, "concurrency")
 	if concurrency == nil {
@@ -32,7 +34,11 @@ func supportedExistingConcurrency(root *yaml.Node) bool {
 		return false
 	}
 	group := yamlField(concurrency, "group")
-	if group == nil || group.Kind != yaml.ScalarNode || group.Tag != "!!str" || !regexp.MustCompile(`^[A-Za-z0-9_./:-]+$`).MatchString(group.Value) {
+	if group == nil || group.Kind != yaml.ScalarNode || group.Tag != "!!str" {
+		return false
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9_./:-]+$`).MatchString(group.Value) &&
+		!regexp.MustCompile(`^services-publish-\$\{\{\s*github\.repository\s*\}\}$`).MatchString(group.Value) {
 		return false
 	}
 	for i := 0; i < len(concurrency.Content); i += 2 {
