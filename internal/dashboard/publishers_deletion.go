@@ -19,6 +19,9 @@ type publisherRemovalProvider interface {
 	PlanWorkflowRemoval(context.Context, githubapp.App, githubapp.Repository) (githubapp.WorkflowPlan, error)
 	RemoveWorkflow(context.Context, githubapp.App, githubapp.Repository, string) (string, error)
 }
+type publisherSecretRemovalProvider interface {
+	RemovePublisherSecret(context.Context, githubapp.App, githubapp.Repository) error
+}
 type publisherDeletionTailnet struct {
 	publishers.Tailnet
 	Shared         bool   `json:"shared"`

@@ -66,7 +66,7 @@ await page.route('**/api/**', async route => {
       return route.fulfill({ json: { connection: saved } })
     }
     assert.equal(req.method(), 'DELETE'); calls.push(`${id}:remove`)
-    if (failRemove) return route.fulfill({ status: 409, body: 'Successor publisher owns this configuration. Cleanup forbidden.' })
+    if (failRemove) return route.fulfill({ status: 409, body: 'Repository secret cleanup could not be verified. The publisher is retained; retry deletion to remove SERVICES_PUBLISH_TOKEN.' })
     status.connections = status.connections.filter(c => c.id !== id)
     return route.fulfill({ json: { removed: true } })
   }
@@ -148,6 +148,8 @@ try {
   await attest().click()
   await dialog().getByRole('heading', { name: 'Delete publisher?', exact: true }).waitFor()
   assert.equal(await card('1').getByText('Connectivity verified', { exact: true }).count(), 1, 'manual attestation must not disconnect')
+  await dialog().getByText('SERVICES_PUBLISH_TOKEN', { exact: true }).waitFor()
+  await dialog().getByText('verifies that it is absent', { exact: false }).waitFor()
   await dialog().getByRole('button', { name: 'Close — finish later', exact: true }).click()
   plans['2'].workflowVerified = true
   status.connections.find(c => c.id === '2').deletion = { prUrl: '', workflowVerified: true, tailscaleConfirmed: false }
@@ -180,8 +182,8 @@ try {
   disablePending = false
   await dialog().getByRole('checkbox').check()
   await finish().click()
-  await dialog().getByRole('alert').getByText('Successor publisher owns this configuration. Cleanup forbidden.', { exact: true }).waitFor()
-  assert.equal(await card('1').count(), 1, 'server-forbidden cleanup must retain record')
+  await dialog().getByRole('alert').getByText('Repository secret cleanup could not be verified. The publisher is retained; retry deletion to remove SERVICES_PUBLISH_TOKEN.', { exact: true }).waitFor()
+  assert.equal(await card('1').count(), 1, 'unverified secret cleanup must retain record')
   await dialog().getByRole('button', { name: 'Close — finish later', exact: true }).click()
   await page.setViewportSize({ width: 390, height: 800 })
   await page.reload()

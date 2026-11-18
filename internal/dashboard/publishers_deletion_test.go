@@ -11,12 +11,21 @@ import (
 
 type deletionProvider struct {
 	*lifecycleProvider
-	removal           githubapp.WorkflowPlan
-	removalErr        error
-	removeErr         error
-	removeCalls       int
-	plannedRepository githubapp.Repository
-	removedRepository githubapp.Repository
+	removal            githubapp.WorkflowPlan
+	removalErr         error
+	removeErr          error
+	removeCalls        int
+	plannedRepository  githubapp.Repository
+	removedRepository  githubapp.Repository
+	secretRemovalCalls int
+	secretRemovalErr   error
+	secretRepository   githubapp.Repository
+}
+
+func (p *deletionProvider) RemovePublisherSecret(_ context.Context, _ githubapp.App, repo githubapp.Repository) error {
+	p.secretRemovalCalls++
+	p.secretRepository = repo
+	return p.secretRemovalErr
 }
 
 func (p *deletionProvider) PlanWorkflowRemoval(_ context.Context, _ githubapp.App, repo githubapp.Repository) (githubapp.WorkflowPlan, error) {
@@ -103,5 +112,8 @@ func TestPublisherDeletionPersistsReviewAndManualRevocationBeforeRemoval(t *test
 	after, _ := store.Load()
 	if len(after.Connections) != 0 {
 		t.Fatal("connection retained after verified removal")
+	}
+	if p.secretRemovalCalls != 1 || p.secretRepository != p.plannedRepository {
+		t.Fatal("publisher secret was not cleaned up in the freshly authorized repository")
 	}
 }

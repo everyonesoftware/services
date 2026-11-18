@@ -166,6 +166,18 @@ func (s *Server) publisherRemove(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Cannot verify current workflow cleanup or Tailscale confirmation. Refresh the deletion review before retrying.", 409)
 			return
 		}
+		cleanup, ok := m.provider.(publisherSecretRemovalProvider)
+		if !ok {
+			http.Error(w, "Repository secret cleanup is unavailable; update the GitHub integration before deleting this publisher", 409)
+			return
+		}
+		// Recheck authorization, workflow absence, trust attestation and active
+		// successors above before touching the repository-wide publisher secret.
+		// Never trust a previous attempt: retries must verify absence again.
+		if err = cleanup.RemovePublisherSecret(ctx, appCredentials(state.App), providerRepository(state.Connections[i].Repository)); err != nil {
+			http.Error(w, "Repository secret cleanup could not be verified. The publisher is retained; retry deletion to remove SERVICES_PUBLISH_TOKEN.", 409)
+			return
+		}
 		state.Connections = append(state.Connections[:i], state.Connections[i+1:]...)
 		if err = m.store.Save(state); err != nil {
 			http.Error(w, "Cannot persist publisher removal; retry", 503)
