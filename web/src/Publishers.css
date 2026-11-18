@@ -50,6 +50,7 @@
 .publisher-step-content > p { color: var(--muted); margin-top: 7px; font-size: 13px; }
 .publisher-footer { margin-top: auto; border-top: 1px solid var(--border); padding: 16px 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: #fafbf5; }
 .publisher-footer p { color: var(--muted); font-size: 11px; flex: 1; min-width: 100px; }
+.publisher-footer button[aria-label="Refresh review"] { display: block; }
 .publisher-cancel { border: 0; padding: 7px 0; background: none; font: inherit; font-size: 11px; color: var(--muted); text-decoration: underline; }
 .publisher-auth-row { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 20px 0 16px; border-bottom: 1px solid #e4e6dc; }
 .publisher-auth-row > div { min-width: 0; }
@@ -312,7 +313,14 @@
   .publishers-workspace .publisher-steps li > span { width: 24px; height: 24px; font-size: 14px; }
   .publishers-workspace .publisher-step-content { padding: 16px 12px; }
   .publishers-workspace .publisher-footer { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; padding: 10px 12px; }
+  .publishers-workspace .publisher-footer:has(> .primary):not(:has(> .publisher-cancel)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .publishers-workspace .publisher-footer > .button { grid-row: 1; }
+  .publisher-setup-workspace .publisher-footer > .primary { grid-column: 2; }
+  .publishers-workspace.publisher-setup-workspace .publisher-footer:has(> .secondary:nth-of-type(2)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .publishers-workspace.publisher-setup-workspace .publisher-footer:has(> .secondary:nth-of-type(2)) > .primary { grid-row: 1; grid-column: 1 / -1; }
+  .publishers-workspace.publisher-setup-workspace .publisher-footer:has(> .secondary:nth-of-type(2)) > .secondary:first-child { grid-row: 2; grid-column: 1; }
+  .publishers-workspace.publisher-setup-workspace .publisher-footer > .secondary:nth-of-type(2) { grid-row: 2; grid-column: 2; padding-inline: 6px; }
+  .publishers-workspace.publisher-setup-workspace .publisher-footer:has(> .secondary:nth-of-type(2)) .publisher-cancel { grid-row: 2; grid-column: 3; }
   .publishers-workspace .publisher-footer > p { grid-column: 1 / -1; margin: 0; font-size: 14px; line-height: 1.4; }
   .publishers-workspace .publisher-footer .publisher-cancel { grid-column: 1 / -1; min-height: 48px; padding: 0; font-size: 16px; line-height: 1.4; }
   .publisher-confirmation .publisher-confirmation-body { padding: 20px 16px; }
@@ -321,4 +329,9 @@
   .publisher-confirmation #publisher-confirmation-description { font-size: 16px; line-height: 1.5; }
   .publisher-confirmation .publisher-footer { padding: 12px 16px; gap: 10px; }
   .publisher-confirmation .publisher-footer .button { flex: 1 1 110px; }
+}
+@media (max-width: 640px) and (max-height: 700px) {
+  /* Redundant footer guidance must not crowd out the review on short phones. */
+  .publisher-setup-workspace .publisher-footer > p { display: none; }
+  .publisher-setup-workspace .publisher-review-word { display: none; }
 }

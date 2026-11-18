@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && node scripts/build-web.mjs",
     "test": "node --test src/*.test.js",
     "test:publisher-repair": "node tests/publisher-repair.browser.mjs",
+    "test:publisher-setup": "node tests/publisher-setup.browser.mjs",
     "test:publisher-deletion": "node tests/publisher-deletion.browser.mjs",
     "test:logs": "node --test src/logs.test.js && node tests/logs.browser.mjs",
     "test:mobile": "node tests/mobile-workspace.browser.mjs && node tests/project-row-update.browser.mjs && node tests/mobile-page-details.browser.mjs && node tests/container-cards.browser.mjs && npm run test:navigation",

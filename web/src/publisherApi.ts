@@ -24,6 +24,7 @@ export type PublisherPlan = {
   supported: boolean; problems: string[]; repository: Repository; imageRepository: string
   approval?: string
   variables: Record<string, string>; secretName: 'SERVICES_PUBLISH_TOKEN'
+  configuration?: RepairPlan['configuration']
   workflow?: { supported: boolean; problems: string[]; files: { path: string; before: string; after: string }[]; fingerprint: string }
 }
 export type RepairPlan = {
@@ -50,7 +51,9 @@ export function imageRepositoryProblem(value: string) {
     ? '' : 'Enter an exact GHCR image repository, such as ghcr.io/acme/site; no tags, digests, URLs, spaces or wildcards.'
 }
 export function canApplyPlan(plan: PublisherPlan | null, repository: Repository | null, imageRepository: string) {
-  return !!(plan?.supported && !plan.problems.length && !plan.workflow?.files.length && matchesPlan(plan, repository, imageRepository))
+  return !!(plan?.supported && !plan.problems.length && !plan.workflow?.files.length && matchesPlan(plan, repository, imageRepository)
+    && (plan.configuration === undefined || (canRepairPlan({ ...plan, configuration: plan.configuration }, { repository: plan.repository, imageRepository } as Connection)
+      && plan.configuration.variables.every(item => plan.variables[item.name] === item.desiredValue))))
 }
 function matchesPlan(plan: PublisherPlan, repository: Repository | null, imageRepository: string) {
   return !!(repository && !imageRepositoryProblem(imageRepository)
@@ -76,6 +79,9 @@ export function canRepairPlan(plan: RepairPlan | null, connection: Connection) {
     && new Set(plan.configuration.variables.map(item => item.name)).size === repairVariableNames.length)
 }
 export function awaitingCallback(connections: Connection[]) { return connections.some(connection => connection.state === 'awaiting_callback') }
+export function publisherSetupStep(connection: Pick<Connection, 'configured' | 'credentialAvailable'>) {
+  return connection.configured === false || connection.credentialAvailable === false ? 3 : 4
+}
 export function orderPublisherConnections(connections: Connection[]) {
   return [...connections.filter(connection => connection.state !== 'disconnected'), ...connections.filter(connection => connection.state === 'disconnected')]
 }
@@ -159,7 +165,7 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
     tailnetGuidance: (repository: Repository) => request<TailnetGuidance>('/tailnet/guidance', 'POST', { repository }),
     repositories: () => request<{ repositories: Repository[] }>('/repositories'),
     plan: (repository: Repository, imageRepository: string) => request<PublisherPlan>('/plan', 'POST', { repository, imageRepository }),
-    apply: (repository: Repository, imageRepository: string, approval?: string) => request<{ connection: Connection }>('', 'POST', { repository, imageRepository, ...(approval === undefined ? {} : { approval }) }),
+    apply: (repository: Repository, imageRepository: string, approval?: string, configurationFingerprint?: string) => request<{ connection: Connection }>('', 'POST', { repository, imageRepository, ...(approval === undefined ? {} : { approval }), ...(configurationFingerprint === undefined ? {} : { configurationFingerprint }) }),
     test: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/test`, 'POST', {}),
     workflow: (repository: Repository, imageRepository: string, fingerprint: string) => request<{ prUrl: string }>('/workflow', 'POST', { repository, imageRepository, fingerprint }),
     disconnect: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/disconnect`, 'POST', {}),
@@ -192,9 +198,9 @@ export async function checkGitHubPermissionsAndRefresh(client: Pick<ReturnType<t
   onStatus(await client.checkGitHubPermissions())
 }
 
-export async function applyAndRefresh(client: Pick<ReturnType<typeof createPublisherApi>, 'apply' | 'status'>, plan: Pick<PublisherPlan, 'repository' | 'imageRepository' | 'approval'>, onStatus: (status: PublisherStatus) => void) {
+export async function applyAndRefresh(client: Pick<ReturnType<typeof createPublisherApi>, 'apply' | 'status'>, plan: Pick<PublisherPlan, 'repository' | 'imageRepository' | 'approval' | 'configuration'>, onStatus: (status: PublisherStatus) => void) {
   let result: { connection: Connection }
-  try { result = await client.apply(plan.repository, plan.imageRepository, plan.approval) }
+  try { result = await (plan.configuration ? client.apply(plan.repository, plan.imageRepository, plan.approval, plan.configuration.fingerprint) : client.apply(plan.repository, plan.imageRepository, plan.approval)) }
   catch (cause) {
     try { onStatus(await readSavedPublisherStatus(client)); if (cause instanceof PublisherRequestTimeout) cause.stateRefreshed = true } catch { /* The original mutation failure remains visible. */ }
     throw cause

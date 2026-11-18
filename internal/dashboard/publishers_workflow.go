@@ -17,18 +17,24 @@ type publisherWorkflowProvider interface {
 }
 
 // Approval binds the review to the exact installation, image, endpoint, tailnet
-// settings, and workflow snapshot. It contains no credentials.
-func publisherApproval(repo githubapp.Repository, image string, variables map[string]string, workflow *githubapp.WorkflowPlan) string {
+// settings, workflow snapshot, and optional provider configuration snapshot. It
+// contains no credentials; omitting configuration preserves legacy approvals.
+func publisherApproval(repo githubapp.Repository, image string, variables map[string]string, workflow *githubapp.WorkflowPlan, configuration ...string) string {
 	fingerprint := ""
 	if workflow != nil {
 		fingerprint = workflow.Fingerprint
 	}
+	configurationFingerprint := ""
+	if len(configuration) > 0 {
+		configurationFingerprint = configuration[0]
+	}
 	data, _ := json.Marshal(struct {
-		Repository githubapp.Repository
-		Image      string
-		Variables  map[string]string
-		Workflow   string
-	}{repo, image, variables, fingerprint})
+		Repository    githubapp.Repository
+		Image         string
+		Variables     map[string]string
+		Workflow      string
+		Configuration string `json:",omitempty"`
+	}{repo, image, variables, fingerprint, configurationFingerprint})
 	return digestID(string(data))
 }
 func (m *publisherIntegration) workflowPlan(ctx context.Context, state publishers.Snapshot, repo githubapp.Repository) (*githubapp.WorkflowPlan, error) {

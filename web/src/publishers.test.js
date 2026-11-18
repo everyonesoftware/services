@@ -649,7 +649,7 @@ test('workflow diff and compact confirmation styling preserve the responsive war
 test('shared wizard footer keeps explicit PR, review-again and apply approvals distinct and gated', () => {
   const calls = []
   const props = { step: 3, busy: false, available: true, canAdvance: true, workflowNeeded: false, pendingWorkflow: false, onBack: () => calls.push('back'), onAdvance: () => calls.push('advance'), onCancel: () => calls.push('cancel') }
-  for (const [state, label] of [[{}, 'Apply &amp; test push'], [{ workflowNeeded: true }, 'Open setup PR'], [{ workflowNeeded: true, pendingWorkflow: true }, 'Review again']]) {
+  for (const [state, label] of [[{}, 'Apply settings &amp; test connection'], [{ workflowNeeded: true }, 'Open setup PR'], [{ workflowNeeded: true, pendingWorkflow: true }, 'Review again']]) {
     const html = renderToStaticMarkup(createElement(ui.PublisherFooter, { ...props, ...state }))
     assert.match(html, /<footer class="publisher-footer">/)
     assert.ok(html.includes(label), label)

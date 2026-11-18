@@ -182,6 +182,9 @@ try {
   planFailure = true
   await primary().click()
   await page.getByRole('alert').getByText('Fixture plan failed after save', { exact: true }).waitFor()
+  await page.locator('.publisher-steps li[aria-current="step"]').filter({ hasText: 'Review & configure' }).waitFor()
+  assert.equal(await primary().innerText(), 'Refresh review', 'failed inspection offers review without another credential save')
+  await button('Back').click()
   assert.equal(await page.getByLabel('Client ID', { exact: true }).inputValue(), 'finance-client')
   planFailure = false
   await primary().click()
@@ -223,7 +226,7 @@ try {
   await primary().click()
   await page.getByRole('heading', { name: 'Review publisher setup' }).waitFor()
   await primary().click()
-  await page.locator('.publisher-steps li[aria-current="step"]').filter({ hasText: 'Verify push' }).waitFor()
+  await page.locator('.publisher-steps li[aria-current="step"]').filter({ hasText: 'Test connection' }).waitFor()
   await checkIndependentScroll(4)
   assert.deepEqual([...checkedScrollSteps].sort(), [0, 1, 2, 3, 4])
   assert.deepEqual(errors, [])

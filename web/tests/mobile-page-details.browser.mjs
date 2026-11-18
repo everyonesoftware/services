@@ -7,7 +7,7 @@ import { createServer } from '../node_modules/vite/dist/node/index.js'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), server: { host: '127.0.0.1', port: 0, hmr: false } })
 await server.listen()
-const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
+const browser = await chromium.launch({ ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : { channel: process.env.BROWSER_CHANNEL || 'msedge' }), headless: true })
 const failures = []
 const capture = async (page, name) => {
   if (!process.env.MOBILE_DETAILS_SCREENSHOT_DIR) return
@@ -36,6 +36,7 @@ async function fixture(viewport, hash) {
   const errors = [], writes = []
   page.on('pageerror', error => errors.push(error.message))
   const repository = { id: 14, fullName: 'Demo/Publisher-with-a-long-name', defaultBranch: 'main', installationId: 8 }
+  const setupRepository = { ...repository, id: 15, fullName: 'Demo/Publisher-new-with-a-long-name' }
   const connection = { id: 'fixture', repository, imageRepository: 'ghcr.io/demo/publisher-with-a-long-name', state: 'verified', createdAt: '2026-01-01T00:00:00Z', lastPublication: { version: 'v3.2.1', tags: ['latest', 'v3.2.1'], digest: `sha256:${'a'.repeat(64)}`, commit: 'abcdef1234567890', publishedAt: '2026-11-10T08:00:00Z', receivedAt: '2026-11-10T08:01:00Z', result: 'accepted' } }
   const status = { available: true, github: { connected: true, name: 'Browser fixture App', permissionsChecked: true, variablesWrite: true }, tailnet: { clientId: '', audience: '', tags: '' }, connections: [connection], endpoint: 'https://services.example.test/api/images/published' }
   const operation = { id: 'running', project: 'publisher-with-a-long-project-name', action: 'update project', state: 'running', phase: 'pulling', queuedAt: '2026-11-12T07:58:12Z', startedAt: '2026-11-12T07:59:12Z', messages: ['a24c9d02 Downloading 64 MB / 100 MB', 'Browser fixture output retained'] }
@@ -44,12 +45,17 @@ async function fixture(viewport, hash) {
     if (req.method() !== 'GET') writes.push(`${req.method()} ${path}`)
     if (path === '/api/auth/status') return route.fulfill({ json: { setupRequired: false } })
     if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 'fixture-admin', username: 'Browser fixture', role: 'admin' } } })
-    if (path === '/api/publishers' && req.method() === 'POST') { connection.state = 'awaiting_callback'; return route.fulfill({ json: { connection } }) }
+    if (path === '/api/publishers' && req.method() === 'POST') {
+      const body = req.postDataJSON()
+      const saved = { id: 'setup', repository: body.repository, imageRepository: body.imageRepository, state: 'awaiting_callback', createdAt: connection.createdAt }
+      status.connections.push(saved)
+      return route.fulfill({ json: { connection: saved } })
+    }
     if (path === '/api/publishers') return route.fulfill({ json: status })
-    if (path === '/api/publishers/repositories') return route.fulfill({ json: { repositories: [repository] } })
-    if (path === '/api/publishers/tailnet/guidance') return route.fulfill({ json: { issuer: 'https://token.actions.githubusercontent.com', subject: 'repo:Demo@42/Publisher-with-a-long-name@14:ref:refs/heads/main', tailnet: { clientId: '', audience: '', tags: '' } } })
+    if (path === '/api/publishers/repositories') return route.fulfill({ json: { repositories: [setupRepository] } })
+    if (path === '/api/publishers/tailnet/guidance') return route.fulfill({ json: { issuer: 'https://token.actions.githubusercontent.com', subject: 'repo:Demo@42/Publisher-new-with-a-long-name@15:ref:refs/heads/main', tailnet: { clientId: '', audience: '', tags: '' } } })
     if (path === '/api/publishers/tailnet') return route.fulfill({ json: status })
-    if (path === '/api/publishers/plan') return route.fulfill({ json: { supported: true, problems: [], repository, imageRepository: connection.imageRepository, approval: 'fixture-approval', secretName: 'SERVICES_PUBLISH_TOKEN', variables: { TAILSCALE_CLIENT_ID: 'fixture-client' } } })
+    if (path === '/api/publishers/plan') return route.fulfill({ json: { supported: true, problems: [], repository: setupRepository, imageRepository: req.postDataJSON().imageRepository, approval: 'fixture-approval', secretName: 'SERVICES_PUBLISH_TOKEN', variables: { TAILSCALE_CLIENT_ID: 'fixture-client' } } })
     if (path === '/api/operations') return route.fulfill({ json: { operations: [operation] } })
     if (path === '/api/monitor') return route.fulfill({ json: { connected: true, lastChecked: new Date().toISOString(), incidents: [], events: [{ id: 'healthy', project: 'publisher-with-a-long-project-name', name: 'publisher-web-1', kind: 'healthy', message: 'Recovered after a health check; all meaningful event details remain readable.', time: '2026-11-12T08:00:19Z' }] } })
     if (path === '/api/projects') return route.fulfill({ json: { projects: [] } })
@@ -135,7 +141,7 @@ async function publishers(viewport) {
       const get = () => page.evaluate(() => {
         const box = s => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom } }
         const outer = document.querySelector('.app-content'), content = document.querySelector('.publisher-step-content')
-        return { steps: box('.publisher-steps'), footer: box('.publisher-wizard .publisher-footer'), outer: outer.scrollHeight - outer.clientHeight, horizontal: content.scrollWidth - content.clientWidth, height: content.clientHeight }
+        return { steps: box('.publisher-steps'), footer: box('.publisher-wizard .publisher-footer'), buttons: [...document.querySelectorAll('.publisher-wizard .publisher-footer button')].map(el => ({ text: el.textContent, width: el.clientWidth, height: el.clientHeight })), outer: outer.scrollHeight - outer.clientHeight, horizontal: content.scrollWidth - content.clientWidth, height: content.clientHeight }
       })
       const before = await get()
       assert.ok(before.height > 80, `step ${step} retains usable short-phone scroll region: ${JSON.stringify(before)}`)
@@ -168,10 +174,10 @@ async function publishers(viewport) {
     await page.getByRole('heading', { name: 'Review publisher setup' }).waitFor()
     await stationary(3)
     await primary().click()
-    await page.locator('.publisher-steps li[aria-current="step"]').filter({ hasText: 'Verify push' }).waitFor()
+    await page.locator('.publisher-steps li[aria-current="step"]').filter({ hasText: 'Test connection' }).waitFor()
     await stationary(4)
     await button('Back to publishers').click()
-    await page.locator('.publisher-row-summary').waitFor()
+    await page.locator('.publisher-row-summary').first().waitFor()
     assert.deepEqual(errors, [])
     assert.deepEqual(writes, ['POST /api/publishers/tailnet/guidance', 'PUT /api/publishers/tailnet', 'POST /api/publishers/plan', 'POST /api/publishers'])
   } finally { await context.close() }

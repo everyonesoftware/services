@@ -469,9 +469,10 @@ func (s *Server) publisherRepositories(w http.ResponseWriter, r *http.Request) {
 }
 
 type publisherSetupRequest struct {
-	Repository      githubapp.Repository `json:"repository"`
-	ImageRepository string               `json:"imageRepository"`
-	Approval        string               `json:"approval,omitempty"`
+	Repository               githubapp.Repository `json:"repository"`
+	ImageRepository          string               `json:"imageRepository"`
+	Approval                 string               `json:"approval,omitempty"`
+	ConfigurationFingerprint string               `json:"configurationFingerprint,omitempty"`
 }
 
 func (m *publisherIntegration) resolve(ctx context.Context, state *publishers.Snapshot, input publisherSetupRequest) (githubapp.Repository, error) {
@@ -560,7 +561,19 @@ func (s *Server) publisherPlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot prepare a workflow plan", 502)
 		return
 	}
-	response := map[string]any{"supported": inspection.Supported, "problems": inspection.Problems, "repository": repo, "imageRepository": input.ImageRepository, "variables": m.variables(state, repo), "secretName": "SERVICES_PUBLISH_TOKEN", "approval": publisherApproval(repo, input.ImageRepository, m.variables(state, repo), workflow)}
+	variables := m.variables(state, repo)
+	configurationFingerprint := ""
+	response := map[string]any{"supported": inspection.Supported, "problems": inspection.Problems, "repository": repo, "imageRepository": input.ImageRepository, "variables": variables, "secretName": "SERVICES_PUBLISH_TOKEN"}
+	if provider, ok := m.provider.(publisherRepairProvider); ok {
+		configuration, err := provider.PlanConfiguration(ctx, appCredentials(state.App), repo, variables)
+		if err != nil {
+			http.Error(w, "Cannot review current GitHub configuration; check App access and retry review", 502)
+			return
+		}
+		response["configuration"] = configuration
+		configurationFingerprint = configuration.Fingerprint
+	}
+	response["approval"] = publisherApproval(repo, input.ImageRepository, variables, workflow, configurationFingerprint)
 	if workflow != nil {
 		response["workflow"] = workflow
 	}
@@ -613,7 +626,19 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot verify the reviewed workflow", 502)
 		return
 	}
-	if input.Approval != publisherApproval(repo, input.ImageRepository, m.variables(state, repo), workflow) {
+	variables := m.variables(state, repo)
+	configurationFingerprint := ""
+	provider, configurationCapable := m.provider.(publisherRepairProvider)
+	if configurationCapable {
+		configuration, err := provider.PlanConfiguration(ctx, appCredentials(state.App), repo, variables)
+		if err != nil {
+			http.Error(w, "Cannot review current GitHub configuration; check App access and retry review", 502)
+			return
+		}
+		configurationFingerprint = configuration.Fingerprint
+	}
+	if input.Approval != publisherApproval(repo, input.ImageRepository, variables, workflow, configurationFingerprint) ||
+		(input.ConfigurationFingerprint != "" && (!configurationCapable || input.ConfigurationFingerprint != configurationFingerprint)) {
 		http.Error(w, "Configuration changed or was not reviewed. Review setup again before applying.", 409)
 		return
 	}
@@ -637,10 +662,17 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot persist publisher setup", 503)
 		return
 	}
-	if err = m.provider.Configure(ctx, appCredentials(state.App), repo, secret, m.variables(state, repo)); err != nil {
+	if configurationCapable && input.ConfigurationFingerprint != "" {
+		err = provider.ApplyConfigurationRepair(ctx, appCredentials(state.App), repo, secret, variables, configurationFingerprint)
+	} else {
+		err = m.provider.Configure(ctx, appCredentials(state.App), repo, secret, variables)
+	}
+	if err != nil {
 		state.Connections[index].State = "error"
 		state.Connections[index].Error = "GitHub provisioning was not completed. Use reviewed repair to approve and reconcile repository configuration."
-		if errors.Is(err, githubapp.ErrConflict) {
+		if configurationCapable && input.ConfigurationFingerprint != "" {
+			state.Connections[index].Error = "GitHub configuration was not verified and may have changed. Use reviewed repair on the saved connection to reconcile settings with the saved credential."
+		} else if errors.Is(err, githubapp.ErrConflict) {
 			state.Connections[index].Error = "GitHub configuration conflicts with existing settings. No conflicting value was overwritten. Use reviewed repair to approve replacing publisher settings and delivering a fresh credential."
 			if revokeErr := s.authStore.RevokeKey(key.ID); revokeErr != nil {
 				http.Error(w, "Cannot revoke the failed setup credential. Revoke it from Accounts before retrying.", 503)
@@ -652,7 +684,15 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Cannot persist failed provisioning status. Review saved setup before retrying.", 503)
 			return
 		}
-		http.Error(w, "GitHub configuration was not completed. New setup never overwrites existing secrets. Use reviewed repair on the saved connection to approve reconciliation.", 409)
+		if configurationCapable && input.ConfigurationFingerprint != "" {
+			status := http.StatusBadGateway
+			if errors.Is(err, githubapp.ErrConflict) {
+				status = http.StatusConflict
+			}
+			http.Error(w, state.Connections[index].Error, status)
+		} else {
+			http.Error(w, "GitHub configuration was not completed. New setup never overwrites existing secrets. Use reviewed repair on the saved connection to approve reconciliation.", 409)
+		}
 		return
 	}
 	state.Connections[index].Configured = true
