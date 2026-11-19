@@ -5,10 +5,12 @@ import { iconForImage, iconForProject } from './brandIcons.js'
 import { ServiceIcon } from './ServiceIcon.tsx'
 import type { IconEditorTarget } from './ServiceIcon.tsx'
 import { serviceHref } from './navigation.ts'
+import { PublisherLinks } from './PublisherReconciliation.tsx'
+import type { Connection } from './publisherApi.ts'
 
 export type IconEditingProps = { icons?: Icon[]; iconsAvailable?: boolean; onEditIcon?: (target: IconEditorTarget) => void }
 export type ResolutionProps = { onResolve?: (container: Container, trigger: HTMLElement) => void; resolveDisabled?: boolean }
-export type ProjectGroupProps = { project: Project; onReview: (project: Project) => void; actionsDisabled: boolean } & IconEditingProps & ResolutionProps
+export type ProjectGroupProps = { project: Project; onReview: (project: Project) => void; actionsDisabled: boolean; publishers?: Connection[] } & IconEditingProps & ResolutionProps
 
 const labels: Record<string, string> = { queued: 'Queued', updating: 'Updating', refreshing: 'Refreshing', healthy: 'Healthy', completed: 'Completed', 'running-unverified': 'No health check', 'restart-loop': 'Restart loop', 'oom-killed': 'Out of memory', missing: 'Missing', unhealthy: 'Unhealthy', starting: 'Starting', restarting: 'Restarting', stopped: 'Stopped', exited: 'Exited', running: 'Running' }
 export function StatusBadge({ status }: { status: string }) {
@@ -43,5 +45,6 @@ export function ProjectGroup(props: ProjectGroupProps) {
       <a className="project-link" href={serviceHref(project.name)}><span className="group-identity"><strong className="identity-name"><span>{project.name}</span></strong><span className="project-metadata"><span className="project-summary-counts">{project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span><span className="group-signals project-health"><StatusBadge status={status} /></span></span></span><span className="navigation-arrow" aria-hidden="true">›</span></a>
       <span className="group-signals project-signals"><ProjectUpdateButton {...props} /></span>
     </div>
+    <PublisherLinks connections={props.publishers ?? []} />
   </article>
 }

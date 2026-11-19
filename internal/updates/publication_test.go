@@ -1,6 +1,7 @@
 package updates
 
 import (
+	"encoding/json"
 	"services/internal/groups"
 	"strings"
 	"testing"
@@ -9,6 +10,38 @@ import (
 func publicationFixture() groups.ImagePublication {
 	return groups.ImagePublication{SchemaVersion: 1, Repository: "ghcr.io/acme/app", Tags: []string{"stable", "latest"}, Digest: "sha256:" + strings.Repeat("a", 64), Version: "v1.2.3", SourceRepository: "acme/app", Commit: strings.Repeat("b", 40), Ref: "refs/heads/main", RunID: "123", RunAttempt: 1, RunURL: "https://github.com/acme/app/actions/runs/123", PublishedAt: "2026-11-09T12:00:00Z"}
 }
+func TestPublicationOptionalRepositoryID(t *testing.T) {
+	p := publicationFixture()
+	legacy, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(legacy), "sourceRepositoryId") {
+		t.Fatal("legacy serialization changed")
+	}
+	for _, id := range []string{"1", "9223372036854775807"} {
+		p.SourceRepositoryID = id
+		if err := ValidatePublication(p); err != nil {
+			t.Fatalf("valid ID %q: %v", id, err)
+		}
+		raw, err := json.Marshal(p)
+		if err != nil || !strings.Contains(string(raw), `"sourceRepositoryId":"`+id+`"`) {
+			t.Fatalf("wire: %s %v", raw, err)
+		}
+	}
+	for _, id := range []string{"0", "01", "-1", "+1", " 1", "1 ", "1.0", "1e2", "9223372036854775808", "１２"} {
+		p.SourceRepositoryID = id
+		if err := ValidatePublication(p); err == nil {
+			t.Fatalf("invalid repository ID accepted: %q", id)
+		}
+	}
+	p.SourceRepositoryID = ""
+	after, _ := json.Marshal(p)
+	if string(after) != string(legacy) {
+		t.Fatal("legacy bytes changed")
+	}
+}
+
 func TestValidatePublicationValidBoundaryForms(t *testing.T) {
 	p := publicationFixture()
 	p.SourceRepository = "acme/.github"

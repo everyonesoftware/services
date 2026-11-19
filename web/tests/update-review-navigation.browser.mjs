@@ -5,7 +5,7 @@ import { createServer } from '../node_modules/vite/dist/node/index.js'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), server: { host: '127.0.0.1', port: 0, hmr: false } })
 await server.listen()
-const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
+const browser = await chromium.launch({ ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : { channel: process.env.BROWSER_CHANNEL || 'msedge' }), headless: true })
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const project = name => ({ name, status: 'healthy', containers: [{ id: `${name}-web`, name: `${name}-web`, project: name, service: 'web', image: 'nginx:stable', state: 'running', health: 'healthy', updateAvailable: true, currentDigest: 'sha256:old', proposedDigest: 'sha256:new' }] })
 const errors = []
@@ -53,6 +53,7 @@ try {
     try {
       await page.goto(server.resolvedUrls.local[0])
       await page.locator('.project-link[href="#service/alpha"]').click()
+      await page.getByRole('heading', { name: 'alpha', exact: true }).waitFor()
       await review.click()
       assert.deepEqual(writes, [], 'Opening a review never submits')
       await dialog.getByRole('button', { name: 'Confirm & update', exact: true }).evaluate(button => { button.click(); button.click() })

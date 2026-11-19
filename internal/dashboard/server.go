@@ -58,6 +58,7 @@ type Server struct {
 	authAttempts                    *loginAttempts
 	publicationLegacy               bool
 	iconStore                       *icons.Store
+	publicationReceiver             PublicationReceiver
 	publicationHandler              http.Handler
 	acknowledgeOperation            func(context.Context, string) error
 	durable                         *operations.Store

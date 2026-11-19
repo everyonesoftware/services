@@ -12,6 +12,21 @@ export type Connection = {
   remoteDisablePending?: boolean
   deletion?: { prUrl: string; workflowVerified: boolean; tailscaleConfirmed: boolean; tailscaleRevocationAttested?: boolean }
   lastPublication?: Publication
+  reconciliation?: { state: 'review_required' | 'identity_mismatch' | 'unavailable' | 'awaiting_publication' | 'reconciled'; previousName: string; currentName: string; repositoryId: number; installationId: number; message: string; checkedAt?: string }
+}
+export type ReconciliationPlan = { repository: Repository; imageRepository: string; previousName: string; fingerprint: string; requiresApproval: boolean }
+
+export function canReconcilePlan(plan: ReconciliationPlan | null, connection: Connection) {
+  const review = connection.reconciliation
+  const validName = (value: unknown) => typeof value === 'string' && value.length <= 140 && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(value) && !/[\s]/.test(value) && !['.', '..'].includes(value.split('/')[1])
+  return !!(review && ['review_required', 'unavailable'].includes(review.state) && plan?.repository && plan.requiresApproval === true
+    && Number.isSafeInteger(plan.repository.id) && plan.repository.id > 0 && plan.repository.id === connection.repository.id && plan.repository.id === review.repositoryId
+    && Number.isSafeInteger(plan.repository.installationId) && plan.repository.installationId > 0 && plan.repository.installationId === connection.repository.installationId && plan.repository.installationId === review.installationId
+    && typeof plan.imageRepository === 'string' && !imageRepositoryProblem(plan.imageRepository) && plan.imageRepository === connection.imageRepository
+    && validName(plan.previousName) && validName(plan.repository.fullName)
+    && plan.previousName === review.previousName && plan.repository.fullName === review.currentName
+    && typeof plan.fingerprint === 'string' && plan.fingerprint.length === 64 && /^[a-f0-9]{64}$/.test(plan.fingerprint)
+    && connection.state !== 'disconnected' && !connection.deletion)
 }
 export type PublisherStatus = {
   available: boolean; reason?: string
@@ -178,6 +193,8 @@ export function createPublisherApi(fetcher: typeof fetch = (...args) => fetch(..
     rotate: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/rotate`, 'POST', {}),
     repairPlan: (id: string) => request<RepairPlan>(`/${encodeURIComponent(id)}/repair/plan`, 'POST', {}),
     repair: (id: string, fingerprint: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/repair`, 'POST', { fingerprint }),
+    reconciliationPlan: (id: string) => request<ReconciliationPlan>(`/${encodeURIComponent(id)}/reconciliation/plan`, 'POST', {}),
+    reconcile: (id: string, fingerprint: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/reconciliation`, 'POST', { fingerprint, approved: true }),
     recover: (id: string) => request<{ connection: Connection }>(`/${encodeURIComponent(id)}/recover`, 'POST', {}),
   }
 }

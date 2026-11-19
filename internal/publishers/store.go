@@ -72,9 +72,15 @@ type Connection struct {
 	Configured           bool
 	RemoteDisablePending bool
 	Deletion             *Deletion
+	ReconciliationReview *ReconciliationReview
+	Reconciliation       *Reconciliation
+	// Original owner is an authorization boundary, unlike a repository name.
+	RepositoryOwner          string
+	PublicationEligibleAfter string
 	// Receipt ordering belongs to the private connection, not its public JSON view.
-	LastPublicationRunID      string
-	LastPublicationRunAttempt int
+	LastPublicationReconciliation string
+	LastPublicationRunID          string
+	LastPublicationRunAttempt     int
 }
 
 type PublicationReceipt struct {

@@ -36,7 +36,7 @@ export function AuthGate() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const pageFromHash = (): AppPage => {
     const hash = typeof window === 'undefined' ? '' : window.location.hash
-    return hash === '#activity' ? 'activity' : hash === '#publishers' ? 'publishers' : hash === '#settings' || hash === '#accounts' ? 'settings' : 'monitor'
+    return hash === '#activity' ? 'activity' : hash === '#publishers' || hash.startsWith('#publishers/') ? 'publishers' : hash === '#settings' || hash === '#accounts' ? 'settings' : 'monitor'
   }
   const [page, setPage] = useState<AppPage>(pageFromHash)
   const navigate = (next: AppPage) => { window.location.hash = next; setPage(next) }

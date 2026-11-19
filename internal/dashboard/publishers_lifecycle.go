@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"services/internal/githubapp"
 	"services/internal/groups"
 	"services/internal/publishers"
+	"services/internal/updates"
 )
 
 type publisherRecoveryProvider interface {
@@ -220,12 +222,13 @@ func (s *Server) revokePublisherKey(id string) error {
 	return err
 }
 
-// Managed connections bind image provenance as well as the existing key image
-// allowlist. The check is local: it never contacts a registry or schedules work.
-func (s *Server) publisherProvenance(key auth.APIKey, p groups.ImagePublication) error {
+// Managed publisher provenance is scoped by the saved key, not JSON identity.
+// Provider lookups and binding CAS run under the integration gate; the receiver
+// itself runs outside that gate so concurrent receipts and callbacks remain live.
+func (s *Server) publisherProvenance(ctx context.Context, key auth.APIKey, p groups.ImagePublication, epoch *string) error {
 	if s.publishers == nil {
 		if s.publisherConfigurationAttempted {
-			return errors.New("publisher configuration unavailable")
+			return errPublisherUnavailable
 		}
 		return nil
 	}
@@ -234,19 +237,102 @@ func (s *Server) publisherProvenance(key auth.APIKey, p groups.ImagePublication)
 	defer m.mu.Unlock()
 	state, err := m.store.Load()
 	if err != nil {
-		return err
+		return errPublisherUnavailable
 	}
-	for _, c := range state.Connections {
+	for i := range state.Connections {
+		c := &state.Connections[i]
 		if c.KeyID != key.ID && c.PreviousKeyID != key.ID {
 			continue
 		}
-		if c.State == "disconnected" || c.ImageRepository != p.Repository || c.Repository.FullName != p.SourceRepository {
+		if c.State == "disconnected" || c.Deletion != nil || c.RemoteDisablePending || c.ImageRepository != p.Repository {
 			return auth.ErrUnauthorized
 		}
+		if c.ReconciliationReview != nil {
+			return errPublisherReview
+		}
+		if p.SourceRepositoryID != "" && p.SourceRepositoryID != strconv.FormatInt(c.Repository.ID, 10) {
+			return auth.ErrUnauthorized
+		}
+		bindingProvider, hasBinding := s.publicationReceiver.(publicationBindingProvider)
+		if !hasBinding && c.Reconciliation != nil && c.Reconciliation.State == "review_required" {
+			return errPublisherReview
+		}
+		var binding updates.PublicationBinding
+		if hasBinding {
+			binding, err = bindingProvider.PublicationRepositoryBinding(ctx, c.ImageRepository)
+			if err != nil {
+				return errPublisherUnavailable
+			}
+			if binding.RepositoryID != 0 && (binding.RepositoryID != c.Repository.ID || binding.InstallationID != c.Repository.InstallationID) {
+				return errPublisherIdentity
+			}
+		}
+		different := c.Repository.FullName != p.SourceRepository || (hasBinding && binding.SourceRepository != "" && binding.SourceRepository != p.SourceRepository)
+		blocked := c.Reconciliation != nil && (c.Reconciliation.State == "identity_mismatch" || c.Reconciliation.State == "unavailable")
+		lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		permission, lookupErr := m.provider.CheckPermissions(lookup, appCredentials(state.App))
+		if lookupErr != nil || !permission.VariablesWrite || state.App.ID <= 0 {
+			return errPublisherUnavailable
+		}
+		repos, lookupErr := m.provider.Repositories(lookup, appCredentials(state.App))
+		if lookupErr != nil {
+			return errPublisherUnavailable
+		}
+		repo, lookupErr := authorizedPublisherRepository(lookup, m, state, *c, repos)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if repo.FullName != p.SourceRepository {
+			return auth.ErrUnauthorized
+		}
+		// Payload equality is not provider authorization. Only after fresh
+		// immutable identity, installation and owner checks may it avoid a CAS.
+		if !different && !blocked && (!hasBinding || binding.SourceRepository != "") {
+			*epoch = c.PublicationEligibleAfter
+			return nil
+		}
+		if !hasBinding {
+			return auth.ErrUnauthorized
+		}
+		if binding.SourceRepository != "" && binding.RepositoryID == 0 {
+			c.Reconciliation = publisherReconciliation(*c, repo.FullName, "review_required")
+			c.Reconciliation.PreviousName = binding.SourceRepository
+			if err = m.store.Save(state); err != nil {
+				return errPublisherUnavailable
+			}
+			return errPublisherReview
+		}
+		if binding.SourceRepository != "" && repositoryOwner(binding.SourceRepository) != repositoryOwner(repo.FullName) {
+			return errPublisherIdentity
+		}
+		if err = reconcileAndReadPublicationBinding(lookup, bindingProvider, binding, storedRepository(repo)); err != nil {
+			return err
+		}
+		if different || blocked || (c.Reconciliation != nil && c.Reconciliation.State == "review_required") {
+			c.Reconciliation = publisherReconciliation(*c, repo.FullName, "awaiting_publication")
+			if binding.SourceRepository != "" {
+				c.Reconciliation.PreviousName = binding.SourceRepository
+			}
+			c.PublicationEligibleAfter = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		c.RepositoryOwner = repositoryOwner(repo.FullName)
+		c.Repository = storedRepository(repo)
+		if err = m.store.Save(state); err != nil {
+			return errPublisherUnavailable
+		}
+		*epoch = c.PublicationEligibleAfter
+		return nil
 	}
 	return nil
 }
-func (s *Server) recordPublisherReceipt(key auth.APIKey, p groups.ImagePublication, result string) error {
+
+type publisherReceiptEvidence struct {
+	Epoch      string
+	ReceivedAt time.Time
+}
+
+func (s *Server) recordPublisherReceipt(key auth.APIKey, p groups.ImagePublication, result string, evidence ...publisherReceiptEvidence) error {
 	if s.publishers == nil || result == "stale" {
 		return nil
 	}
@@ -265,12 +351,30 @@ func (s *Server) recordPublisherReceipt(key auth.APIKey, p groups.ImagePublicati
 		if c.State == "disconnected" || c.ImageRepository != p.Repository || c.Repository.FullName != p.SourceRepository {
 			return auth.ErrUnauthorized
 		}
+		if c.PublicationEligibleAfter != "" {
+			// Never relabel an in-flight acceptance with a later reconciliation.
+			if len(evidence) == 0 || evidence[0].Epoch != c.PublicationEligibleAfter {
+				return nil
+			}
+			boundary, boundaryErr := time.Parse(time.RFC3339Nano, c.PublicationEligibleAfter)
+			published, publishedErr := time.Parse(time.RFC3339Nano, p.PublishedAt)
+			if boundaryErr != nil || publishedErr != nil || published.Before(boundary) || evidence[0].ReceivedAt.IsZero() || evidence[0].ReceivedAt.Before(boundary) {
+				return nil
+			}
+		}
 		if !publisherReceiptIsNewer(p, *c) {
 			return nil
 		}
 		c.LastPublication = &publishers.PublicationReceipt{Version: p.Version, Digest: p.Digest, Tags: append([]string(nil), p.Tags...), Commit: p.Commit, RunURL: p.RunURL, PublishedAt: p.PublishedAt, ReceivedAt: time.Now().UTC().Format(time.RFC3339), Result: result}
+		c.LastPublicationReconciliation = c.PublicationEligibleAfter
 		c.LastPublicationRunID = p.RunID
 		c.LastPublicationRunAttempt = p.RunAttempt
+		// Retain receipt evidence during pending recovery without mutating the
+		// reconciliation state/message bound to its durable review fingerprint.
+		if c.ReconciliationReview == nil && c.Reconciliation != nil && c.Reconciliation.State == "awaiting_publication" {
+			c.Reconciliation.State = "reconciled"
+			c.Reconciliation.Message = "A new image publication was accepted after repository reconciliation."
+		}
 		return m.store.Save(state)
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"services/internal/groups"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -47,6 +48,12 @@ func ValidatePublication(p groups.ImagePublication) error {
 	}
 	if !publicationSource.MatchString(p.SourceRepository) || strings.HasSuffix(p.SourceRepository, "/.") || strings.HasSuffix(p.SourceRepository, "/..") {
 		return invalid("sourceRepository")
+	}
+	if p.SourceRepositoryID != "" {
+		id, err := strconv.ParseInt(p.SourceRepositoryID, 10, 64)
+		if err != nil || id <= 0 || !publicationRun.MatchString(p.SourceRepositoryID) {
+			return invalid("sourceRepositoryId")
+		}
 	}
 	if !boundedText(p.Ref, 1024) || !strings.HasPrefix(p.Ref, "refs/") || len(p.Ref) <= 5 || strings.ContainsAny(p.Ref, " ~^:?*[\\") || strings.Contains(p.Ref, "..") || strings.Contains(p.Ref, "@{") || strings.Contains(p.Ref, "//") || strings.HasSuffix(p.Ref, "/") || strings.HasSuffix(p.Ref, ".") {
 		return invalid("ref")

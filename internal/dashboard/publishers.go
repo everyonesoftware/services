@@ -50,6 +50,7 @@ type publisherConnectionView struct {
 	VerifiedAt           string                         `json:"verifiedAt,omitempty"`
 	LastPublication      *publishers.PublicationReceipt `json:"lastPublication,omitempty"`
 	RemoteDisablePending bool                           `json:"remoteDisablePending,omitempty"`
+	Reconciliation       *publishers.Reconciliation     `json:"reconciliation,omitempty"`
 	Deletion             *publisherDeletionView         `json:"deletion,omitempty"`
 }
 
@@ -62,6 +63,23 @@ type publisherDeletionView struct {
 
 func connectionView(c publishers.Connection) publisherConnectionView {
 	view := publisherConnectionView{Configured: c.Configured, ID: c.ID, Repository: c.Repository, ImageRepository: c.ImageRepository, State: c.State, Error: c.Error, KeyID: c.KeyID, CreatedAt: c.CreatedAt, VerifiedAt: c.VerifiedAt, LastPublication: c.LastPublication, RemoteDisablePending: c.RemoteDisablePending}
+	view.Reconciliation = c.Reconciliation
+	if c.ReconciliationReview != nil {
+		view.Reconciliation = publisherReconciliation(c, c.Repository.FullName, "review_required")
+		view.Reconciliation.Message = "Repository reconciliation has a pending durable approval. Retry the reviewed operation or request a fresh review."
+		view.LastPublication = nil
+	}
+	if c.PublicationEligibleAfter != "" {
+		boundary, boundaryErr := time.Parse(time.RFC3339Nano, c.PublicationEligibleAfter)
+		if c.LastPublication == nil {
+			view.LastPublication = nil
+		} else {
+			published, publishedErr := time.Parse(time.RFC3339Nano, c.LastPublication.PublishedAt)
+			if c.LastPublicationReconciliation != c.PublicationEligibleAfter || boundaryErr != nil || publishedErr != nil || published.Before(boundary) {
+				view.LastPublication = nil
+			}
+		}
+	}
 	if c.Deletion != nil {
 		view.Deletion = &publisherDeletionView{PRURL: c.Deletion.PRURL, WorkflowVerified: c.Deletion.WorkflowVerified, TailscaleConfirmed: c.Deletion.TailscaleConfirmed, TailscaleRevocationAttested: publisherTailscaleRevocationAttested(c)}
 	}
@@ -112,6 +130,8 @@ func (s *Server) registerPublisherRoutes() {
 	s.mux.HandleFunc("POST /api/publishers/plan", s.publisherPlan)
 	s.mux.HandleFunc("POST /api/publishers/workflow", s.publisherInstallWorkflow)
 	s.mux.HandleFunc("POST /api/publishers", s.publisherCreate)
+	s.mux.HandleFunc("POST /api/publishers/{id}/reconciliation/plan", s.publisherReconciliationPlan)
+	s.mux.HandleFunc("POST /api/publishers/{id}/reconciliation", s.publisherReconciliationApply)
 	s.mux.HandleFunc("POST /api/publishers/{id}/test", s.publisherTest)
 	s.mux.HandleFunc("POST /api/publishers/{id}/repair/plan", s.publisherRepairReview)
 	s.mux.HandleFunc("POST /api/publishers/{id}/repair", s.publisherRepair)
@@ -186,7 +206,7 @@ func (s *Server) publisherStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Publisher storage unavailable", 503)
 		return
 	}
-	changed := false
+	changed := s.discoverPublisherRepositories(r.Context(), &state)
 	now := time.Now().Unix()
 	keys, err := s.authStore.ListKeys()
 	if err != nil {
@@ -652,7 +672,7 @@ func (s *Server) publisherCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot create scoped publisher key", 503)
 		return
 	}
-	c := publishers.Connection{ID: id, Repository: storedRepository(repo), ImageRepository: input.ImageRepository, State: "configured", KeyID: key.ID, Secret: secret, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	c := publishers.Connection{ID: id, Repository: storedRepository(repo), RepositoryOwner: repositoryOwner(repo.FullName), ImageRepository: input.ImageRepository, State: "configured", KeyID: key.ID, Secret: secret, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	state.Connections = append(state.Connections, c)
 	index := len(state.Connections) - 1
 	// Retain the key's identity before any remote write. Unknown partial setup is

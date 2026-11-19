@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,6 +92,9 @@ func OpenPublicationStore(path string) (*PublicationStore, error) {
 	if err = s.initReconciliations(); err != nil {
 		return fail(err)
 	}
+	if err = s.initRepositoryBindings(); err != nil {
+		return fail(err)
+	}
 	return s, nil
 }
 func (s *PublicationStore) Close() error { return s.db.Close() }
@@ -135,8 +139,19 @@ func (s *PublicationStore) accept(ctx context.Context, p groups.ImagePublication
 	if !newRepository && !strings.EqualFold(source, p.SourceRepository) {
 		return "", ErrPublicationConflict
 	}
+	if p.SourceRepositoryID != "" {
+		binding, err := publicationRepositoryBinding(ctx, tx, p.Repository)
+		if err != nil {
+			return "", err
+		}
+		if binding.RepositoryID != 0 && p.SourceRepositoryID != strconv.FormatInt(binding.RepositoryID, 10) {
+			return "", ErrPublicationConflict
+		}
+	}
 	var previous string
-	err = tx.QueryRowContext(ctx, "SELECT payload FROM publication_events WHERE repository=? AND source=? AND run_id=? AND attempt=?", p.Repository, strings.ToLower(p.SourceRepository), p.RunID, p.RunAttempt).Scan(&previous)
+	// Run/attempt identity belongs to the image's immutable ownership, not
+	// its current name. Retained events under previous names still fence replay.
+	err = tx.QueryRowContext(ctx, "SELECT payload FROM publication_events WHERE repository=? AND run_id=? AND attempt=? ORDER BY id LIMIT 1", p.Repository, p.RunID, p.RunAttempt).Scan(&previous)
 	if err == nil {
 		if previous != string(payload) {
 			return "", ErrPublicationConflict

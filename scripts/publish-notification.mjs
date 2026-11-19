@@ -13,6 +13,8 @@ export function createPayload(env, publishedAt = new Date().toISOString()) {
     tags: references.map(reference => reference.slice(reference.lastIndexOf(':') + 1)),
     digest: env.PUBLISHED_DIGEST, version: env.APP_VERSION,
     sourceRepository: env.GITHUB_REPOSITORY, commit: env.GITHUB_SHA,
+    // Opt in only after upgrading the receiver; old receivers reject unknown fields.
+    ...(env.SERVICES_PUBLISH_IDENTITY_VERSION === '1' ? { sourceRepositoryId: env.GITHUB_REPOSITORY_ID } : {}),
     ref: env.GITHUB_REF, runId: env.GITHUB_RUN_ID, runAttempt: Number(env.GITHUB_RUN_ATTEMPT),
     runUrl: `https://github.com/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
     publishedAt,
@@ -28,7 +30,12 @@ function check(condition, field) {
 export function validatePayload(payload) {
   check(payload && typeof payload === 'object' && !Array.isArray(payload), 'payload');
   const fields = ['schemaVersion', 'repository', 'tags', 'digest', 'version', 'sourceRepository', 'commit', 'ref', 'runId', 'runAttempt', 'runUrl', 'publishedAt'];
-  check(Object.keys(payload).length === fields.length && fields.every(key => Object.hasOwn(payload, key)), 'payload fields');
+  const optionalIdentity = Object.hasOwn(payload, 'sourceRepositoryId');
+  check(Object.keys(payload).length === fields.length + Number(optionalIdentity) && fields.every(key => Object.hasOwn(payload, key)), 'payload fields');
+  if (optionalIdentity) {
+    // Decimal text avoids rounding immutable IDs above JavaScript's safe integer limit.
+    check(typeof payload.sourceRepositoryId === 'string' && /^[1-9][0-9]{0,18}$/.test(payload.sourceRepositoryId) && BigInt(payload.sourceRepositoryId) <= 9223372036854775807n, 'sourceRepositoryId');
+  }
   const matches = (field, pattern) => check(typeof payload[field] === 'string' && pattern.test(payload[field]), field);
   check(payload.schemaVersion === 1, 'schemaVersion');
   matches('repository', /^ghcr\.io\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+$/);
@@ -50,6 +57,9 @@ export function validatePayload(payload) {
   check(Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === payload.publishedAt, 'publishedAt');
 }
 
+// Only errors created locally may retain diagnostic text through sanitization.
+class NotificationFailure extends Error {}
+
 export async function sendNotification({ endpoint, token, payload, transport = fetch, maxAttempts = 4, timeoutMs = 10_000, baseDelayMs = 1_000 }) {
   validatePayload(payload);
   check(Number.isInteger(maxAttempts) && maxAttempts >= 1 && maxAttempts <= 5 && Number.isInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= 30_000 && Number.isInteger(baseDelayMs) && baseDelayMs >= 0 && baseDelayMs <= 5_000, 'retry options');
@@ -59,6 +69,7 @@ export async function sendNotification({ endpoint, token, payload, transport = f
   try { url = new URL(endpoint); } catch { throw new Error('Invalid endpoint'); }
   check(url.protocol === 'https:' && url.hostname && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/api/images/published', 'endpoint');
   const body = JSON.stringify(payload); // Serialize once: every attempt sends identical bytes.
+  let lastStatus;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -68,20 +79,29 @@ export async function sendNotification({ endpoint, token, payload, transport = f
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body, redirect: 'manual', signal: controller.signal,
       });
+      lastStatus = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : undefined;
       if (response.status === 408 || response.status === 429 || response.status >= 500 && response.status <= 599) {
         transient = true;
         await response.body?.cancel();
       } else {
         if (!response.ok) {
           await response.body?.cancel();
-          throw new Error('Notification rejected');
+          throw new NotificationFailure(lastStatus ? `Notification rejected (HTTP ${lastStatus})` : 'Notification rejected or invalid acknowledgement');
         }
-        const acknowledgement = await response.json();
-        if (!['accepted', 'duplicate', 'stale'].includes(acknowledgement?.result)) throw new Error('Notification invalid acknowledgement');
+        let acknowledgement;
+        try { acknowledgement = await response.json(); }
+        catch (error) {
+          // Only completed malformed JSON is permanent. Body I/O and aborts
+          // retain their original type/code for the outer transient classifier.
+          if (!(error instanceof SyntaxError)) throw error;
+          throw new NotificationFailure(lastStatus ? `Notification invalid acknowledgement (HTTP ${lastStatus})` : 'Notification rejected or invalid acknowledgement');
+        }
+        if (!['accepted', 'duplicate', 'stale'].includes(acknowledgement?.result)) throw new NotificationFailure(lastStatus ? `Notification invalid acknowledgement (HTTP ${lastStatus})` : 'Notification rejected or invalid acknowledgement');
         return acknowledgement.result;
       }
     } catch (error) {
       // Never expose URLs, credentials, response bodies or fetch exception text.
+      if (error instanceof NotificationFailure) throw error;
       const transientCodes = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
       transient = transient || controller.signal.aborted || transientCodes.has(error.cause?.code ?? error.code);
       if (!transient) throw new Error('Notification rejected or invalid acknowledgement');
@@ -90,7 +110,7 @@ export async function sendNotification({ endpoint, token, payload, transport = f
     }
     if (attempt < maxAttempts) await new Promise(resolve => setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)));
   }
-  throw new Error(`Notification failed after ${maxAttempts} attempts`);
+  throw new Error(`Notification failed after ${maxAttempts} attempts${lastStatus ? ` (last HTTP ${lastStatus})` : ''}`);
 }
 
 // Only the exported API accepts an injected transport; the CLI always enforces HTTPS.
@@ -126,7 +146,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const result = await runCli(process.argv.slice(2), process.env);
     console.log(result ? `Publish notification acknowledged: ${result}` : 'Publish notification payload captured');
   } catch (error) {
-    const safe = /^(Invalid [A-Za-z_ ]+|Notification rejected or invalid acknowledgement|Notification failed after [1-5] attempts)$/.test(error.message) ? error.message : 'operation failed';
+    const safe = /^(Invalid [A-Za-z_ ]+|Notification rejected or invalid acknowledgement|Notification (?:rejected|invalid acknowledgement) \(HTTP [1-5][0-9]{2}\)|Notification failed after [1-5] attempts(?: \(last HTTP [1-5][0-9]{2}\))?)$/.test(error.message) ? error.message : 'operation failed';
     console.error(`Publish notification failed: ${safe}`);
     process.exitCode = 1;
   }

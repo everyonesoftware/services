@@ -30,6 +30,7 @@ var publicationRepository = regexp.MustCompile(`^ghcr\.io/[a-z0-9]+(?:(?:[._]|__
 // Invalid configuration leaves the endpoint disabled, including on reconfiguration.
 func (s *Server) ConfigurePublicationNotifications(token string, repositories []string, receiver PublicationReceiver) error {
 	s.publicationHandler = nil
+	s.publicationReceiver = nil
 	s.publicationLegacy = false
 	if len(token) < 32 || len(token) > 512 || strings.IndexFunc(token, func(r rune) bool { return r < 33 || r > 126 }) >= 0 {
 		return errors.New("publication token must contain 32 to 512 printable non-space ASCII characters")
@@ -44,6 +45,7 @@ func (s *Server) ConfigurePublicationNotifications(token string, repositories []
 		}
 		allowed[repository] = struct{}{}
 	}
+	s.publicationReceiver = receiver
 	s.publicationHandler = s.newPublicationHandler(token, allowed, receiver)
 	s.publicationLegacy = true
 	return nil
@@ -53,10 +55,12 @@ func (s *Server) ConfigurePublicationNotifications(token string, repositories []
 // supplies its own repository allowlist; no environment credential is required.
 func (s *Server) ConfigurePublicationReceiver(receiver PublicationReceiver) error {
 	s.publicationHandler = nil
+	s.publicationReceiver = nil
 	s.publicationLegacy = false
 	if !s.AuthenticationConfigured() || receiver == nil {
 		return errors.New("managed publication notifications require authentication and a receiver")
 	}
+	s.publicationReceiver = receiver
 	s.publicationHandler = s.newPublicationHandler("", nil, receiver)
 	return nil
 }
@@ -126,24 +130,22 @@ func (s *Server) newPublicationHandler(token string, legacyAllowed map[string]st
 			http.Error(w, "Image repository is outside credential scope", http.StatusForbidden)
 			return
 		}
+		var ingressEpoch string
 		if managed {
-			if err := s.publisherProvenance(key, publication); err != nil {
-				if errors.Is(err, auth.ErrUnauthorized) {
-					http.Error(w, "Publication source is outside this connection's scope", http.StatusForbidden)
-				} else {
-					http.Error(w, "Publisher configuration unavailable", http.StatusServiceUnavailable)
-				}
+			if err := s.publisherProvenance(r.Context(), key, publication, &ingressEpoch); err != nil {
+				publisherReconciliationError(w, err)
 				return
 			}
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
+		evidence := publisherReceiptEvidence{Epoch: ingressEpoch, ReceivedAt: time.Now().UTC()}
 		result, err := receiver.AcceptPublication(ctx, publication)
 		if err != nil {
 			if errors.Is(err, updates.ErrPublicationConflict) {
-				http.Error(w, "Publication conflicts with an existing event", http.StatusConflict)
+				authJSON(w, http.StatusConflict, map[string]string{"error": "publication_conflict"})
 			} else {
-				http.Error(w, "Cannot persist publication notification", http.StatusServiceUnavailable)
+				authJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "publication_unavailable"})
 			}
 			return
 		}
@@ -152,7 +154,19 @@ func (s *Server) newPublicationHandler(token string, legacyAllowed map[string]st
 			return
 		}
 		if managed {
-			if err := s.recordPublisherReceipt(key, publication, result); err != nil {
+			if proof, ok := receiver.(interface {
+				PublicationEventReceivedAt(context.Context, groups.ImagePublication) (time.Time, error)
+			}); ok && ingressEpoch != "" && result != "stale" {
+				evidence.ReceivedAt, err = proof.PublicationEventReceivedAt(ctx, publication)
+				if err != nil {
+					publisherReconciliationError(w, errPublisherUnavailable)
+					return
+				}
+			} else if result != "accepted" {
+				// Request start proves nothing about an earlier duplicate acceptance.
+				evidence.ReceivedAt = time.Time{}
+			}
+			if err := s.recordPublisherReceipt(key, publication, result, evidence); err != nil {
 				http.Error(w, "Publication recorded but connection receipt could not be persisted; retry the original payload", http.StatusServiceUnavailable)
 				return
 			}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, RefObject } from 'react'
 import { applyAndRefresh, awaitingCallback, canApplyPlan, canOpenWorkflowPlan, canRepairPlan, checkGitHubPermissionsAndRefresh, createPublisherApi, githubInstallUrl, githubManifestAction, githubPermissionsUrl, githubPullRequestUrl, githubRunUrl, githubVariablesReady, imageRepositoryProblem, orderPublisherConnections, publisherSetupStep, readyForPublisherRepositories, refreshAfterPublisherTimeout } from './publisherApi.ts'
 import type { Connection, GitHubStart, PublisherPlan, PublisherStatus, RepairPlan, Repository, Tailnet, TailnetGuidance } from './publisherApi.ts'
@@ -9,6 +9,8 @@ import { PageHeader } from './PageHeader.tsx'
 import { Breadcrumb } from './Breadcrumb.tsx'
 import { PublisherDeletion } from './PublisherDeletion.tsx'
 import { PublisherRepair, PublisherRepairReview } from './PublisherRepair.tsx'
+import { PublisherReconciliation, PublisherRenameNotice } from './PublisherReconciliation.tsx'
+import { publisherRoute, publisherNeedsAttention } from './publisherReconciliation.ts'
 
 export type { AppPage } from './AppShell.tsx'
 export { AppNavigation } from './AppShell.tsx'
@@ -144,7 +146,7 @@ export function PublisherWorkflowPending({ plan, prUrl }: { plan: PublisherPlan;
 
 type ManagementAction = 'disconnect' | 'rotate' | 'reconnect'
 type ConnectionView = 'publication' | 'connection'
-type ConnectionProps = { connection: Connection; busy: boolean; onTest: (id: string) => void; onRecover?: (id: string) => void; onRepair?: (connection: Connection) => void; onManage?: (connection: Connection, action: ManagementAction) => void; view?: ConnectionView }
+type ConnectionProps = { connection: Connection; busy: boolean; onTest: (id: string) => void; onRecover?: (id: string) => void; onRepair?: (connection: Connection) => void; onRename?: (connection: Connection) => void; onRefresh?: () => void; onManage?: (connection: Connection, action: ManagementAction) => void; view?: ConnectionView }
 const connectionLabels: Record<Connection['state'], string> = { configured: 'Configured', awaiting_callback: 'Waiting for authenticated callback', verified: 'Connectivity verified', error: 'Connection needs attention', disconnected: 'Disconnected' }
 const verifiedPublication = (connection: Connection) => connection.state === 'verified' && connection.lastPublication?.digest && connection.lastPublication.receivedAt ? connection.lastPublication : null
 
@@ -155,10 +157,11 @@ export function PublisherConnectionRow({ connection, expanded, view = 'publicati
     <div className="publisher-row-heading"><button type="button" className="publisher-row-summary" aria-expanded={expanded} aria-controls={`${id}-details`} onClick={onToggle}>
       <span className="publisher-row-identity"><strong className="publisher-row-name">{connection.repository.fullName}</strong><code>{connection.imageRepository}</code></span>
       <span className={`publisher-row-state ${connection.state}`}>{connectionLabels[connection.state]}</span>
-      <span className="publisher-row-delivery">{publication ? 'Image received' : 'No image received'}</span>
+      <span className="publisher-row-delivery">{connection.reconciliation?.state === 'awaiting_publication' ? 'Awaiting next publication' : publication ? 'Image received' : 'No image received'}</span>
       <span className="publisher-row-chevron" aria-hidden="true">{expanded ? '−' : '›'}</span>
     </button>{onDelete && <button type="button" className="button secondary publisher-danger publisher-row-delete" disabled={actions.busy} onClick={() => onDelete(connection)}>{connection.deletion ? 'Continue deletion' : 'Delete'}</button>}</div>
     {expanded && <div className="publisher-row-details" id={`${id}-details`}>
+      <PublisherRenameNotice connection={connection} busy={actions.busy} onReview={() => actions.onRename?.(connection)} onRefresh={() => actions.onRefresh?.()} />
       <div className="publisher-detail-tabs" role="tablist" aria-label={`Details for ${connection.repository.fullName}`}>
         {(['publication', 'connection'] as const).map(item => <button type="button" key={item} id={`${id}-${item}`} role="tab" aria-selected={view === item} tabIndex={view === item ? 0 : -1} aria-controls={`${id}-panel`} onClick={() => onView(item)} onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -247,10 +250,28 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
   const [confirmation, setConfirmation] = useState<{ connection: Connection; action: ManagementAction } | null>(null)
   const [deletionId, setDeletionId] = useState('')
   const [repairId, setRepairId] = useState('')
+  const [renameId, setRenameId] = useState('')
+  const [linkedId, setLinkedId] = useState(() => publisherRoute(typeof window === 'undefined' ? '' : window.location.hash))
   const [connectionId, setConnectionId] = useState('')
   const [expandedConnection, setExpandedConnection] = useState<{ id: string; view: ConnectionView } | null>(null)
+  useLayoutEffect(() => {
+    if (!linkedId || loading || expandedConnection?.id !== linkedId) return
+    const reveal = () => {
+      const content = document.getElementById('page-content')
+      const notice = document.getElementById(`publisher-${encodeURIComponent(linkedId)}-details`)?.querySelector<HTMLElement>('.publisher-rename-notice')
+      const actions = notice?.querySelector('.publisher-rename-actions')
+      if (!content || !notice || !actions) return
+      const viewport = content.getBoundingClientRect()
+      // Deep links land on the repair, not below a tall identity row or behind phone navigation.
+      if (actions.getBoundingClientRect().bottom > viewport.bottom - 16) content.scrollTop += Math.max(0, notice.getBoundingClientRect().top - viewport.top - 16)
+    }
+    reveal()
+    window.addEventListener('resize', reveal)
+    return () => window.removeEventListener('resize', reveal)
+  }, [linkedId, loading, expandedConnection?.id])
+  useEffect(() => { const changed = () => { const id = publisherRoute(window.location.hash); setLinkedId(id); if (id) { setStep(null); setExpandedConnection({ id, view: 'connection' }) } }; changed(); window.addEventListener('hashchange', changed); return () => window.removeEventListener('hashchange', changed) }, [])
   const [revision, setRevision] = useState(0)
-  const pendingCallback = awaitingCallback(status?.connections ?? [])
+  const pendingCallback = awaitingCallback(status?.connections ?? []) || !!status?.connections.some(item => item.reconciliation?.state === 'awaiting_publication')
   useEffect(() => {
     const revealCurrentStep = () => {
       const navigation = stepNavigation.current
@@ -434,14 +455,15 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
   const primaryLabel = step === 3 && !plan && !setupRepair ? connectionId && !reviewAttempted ? 'Review changes' : 'Refresh review' : step === 4 ? selectedConnection?.state === 'verified' ? 'Done' : selectedConnection && publisherSetupStep(selectedConnection) === 3 ? 'Review changes' : selectedConnection && ['configured', 'error'].includes(selectedConnection.state) ? 'Retry connection test' : 'Check status' : undefined
   const canAdvance = step === 0 ? readyForRepositories : step === 1 ? !!repository && !imageRepositoryProblem(imageRepository) : step === 2 ? !!guidance?.subject && [tailnet.clientId, tailnet.audience, tailnet.tags].every(value => !!value && !/\s/.test(value)) : step === 3 ? !setupBlocked && (!!prUrl || workflowNeeded || canApplyPlan(plan, repository, imageRepository) || (!!setupRepair && !!selectedConnection && canRepairPlan(setupRepair, selectedConnection)) || (!plan && !setupRepair)) : step === 4
 
-  return <AppShell active="publishers" user={user} onMonitor={onBack} onAccounts={onAccounts} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
+  return <AppShell publisherAttention={status?.connections.filter(publisherNeedsAttention).length} active="publishers" user={user} onMonitor={onBack} onAccounts={onAccounts} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
     <main className={`workspace publishers-workspace${step === null ? '' : ' publisher-setup-workspace'}`} id="publishers-content"><Breadcrumb root="Publishers" /><PageHeader title={step === null ? 'Publishers' : 'Connect an image publisher'} actions={<><button className="button secondary" disabled={busy || loading} onClick={refreshStatus}>Refresh</button>{step === null && <button className="button primary" disabled={busy || loading || !savedStatus?.available} onClick={() => changeStep(0)}>Connect repository</button>}</>} />
+      {linkedId && status && !status.connections.some(item => item.id === linkedId) && <p className="notice danger" role="alert">This publisher is not present in saved status. Choose a publisher below.</p>}
       {error && step === null && <p className="notice danger" role="alert">{error}</p>}
       {loading && <p className="publisher-loading" role="status">Loading publisher configuration…</p>}
       {!status && !loading && <section className="publisher-panel publisher-empty"><h2>Publishers couldn’t be loaded</h2><p>Check your connection and use Refresh to try again.</p></section>}
       {status && <>{!available && <div className="publisher-info publisher-warning" role="alert"><strong>Publisher setup is unavailable</strong>{status.reason || 'This server is not configured for publisher setup.'}</div>}
         {step === null && <GitHubPermissionNotice github={status.github} busy={busy} onFinish={() => changeStep(0)} />}
-        {step === null ? <><section className="publisher-list-heading" aria-label="Publisher connections"><span className="publisher-muted">{status.github.connected ? 'GitHub App connected' : 'GitHub App not connected'}</span>{!busy && githubVariablesReady(status.github) && status.github.installUrl && githubInstallUrl(status.github.installUrl) && <a href={status.github.installUrl} target="_blank" rel="noreferrer">Manage repository access ↗</a>}</section>{status.connections.length === 0 && <section className="publisher-panel publisher-empty"><h2>No publishers connected</h2><p>Connect a repository to begin. Image installation always requires confirmation.</p></section>}<div className="publisher-connections">{status.connections.map(connection => <PublisherConnectionRow key={connection.id} connection={connection} expanded={expandedConnection?.id === connection.id} view={expandedConnection?.id === connection.id ? expandedConnection.view : 'publication'} onToggle={() => setExpandedConnection(current => current?.id === connection.id ? null : { id: connection.id, view: connection.state === 'error' || connection.state === 'disconnected' ? 'connection' : 'publication' })} onView={view => setExpandedConnection({ id: connection.id, view })} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onRepair={reviewRepair} onManage={manageConnection} onDelete={deleteConnection} />)}</div></>
+        {step === null ? <><section className="publisher-list-heading" aria-label="Publisher connections"><span className="publisher-muted">{status.github.connected ? 'GitHub App connected' : 'GitHub App not connected'}</span>{!busy && githubVariablesReady(status.github) && status.github.installUrl && githubInstallUrl(status.github.installUrl) && <a href={status.github.installUrl} target="_blank" rel="noreferrer">Manage repository access ↗</a>}</section>{status.connections.length === 0 && <section className="publisher-panel publisher-empty"><h2>No publishers connected</h2><p>Connect a repository to begin. Image installation always requires confirmation.</p></section>}<div className="publisher-connections">{[...status.connections].sort((left, right) => Number(right.id === linkedId) - Number(left.id === linkedId)).map(connection => <PublisherConnectionRow key={connection.id} connection={connection} expanded={expandedConnection?.id === connection.id} view={expandedConnection?.id === connection.id ? expandedConnection.view : 'publication'} onToggle={() => setExpandedConnection(current => current?.id === connection.id ? null : { id: connection.id, view: connection.state === 'error' || connection.state === 'disconnected' ? 'connection' : 'publication' })} onView={view => setExpandedConnection({ id: connection.id, view })} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onRepair={reviewRepair} onManage={manageConnection} onDelete={deleteConnection} onRename={connection => { if (!busy) setRenameId(connection.id) }} onRefresh={refreshStatus} />)}</div></>
           : <section className="publisher-panel publisher-wizard" aria-label="Publisher setup"><ol className="publisher-steps" ref={stepNavigation}>{steps.map((name, index) => <li key={name} className={index === step ? 'active' : index < step ? 'done' : ''} aria-current={index === step ? 'step' : undefined}><span>{index < step ? '✓' : index + 1}</span>{name}</li>)}<li className="publisher-aside">GitHub Actions pushes metadata to Services over your private Tailscale connection.<br /><br />No automatic container updates.</li></ol><div className="publisher-wizard-content"><fieldset className="publisher-controls" disabled={busy || !available} aria-label="Publisher setup controls"><div className="publisher-step-content" key={step} role="region" aria-label="Publisher step content" tabIndex={0}>
             {step === 0 && <><h2>Connect your GitHub App</h2><p>The GitHub App can be reused for repositories you explicitly authorize. Tailscale trust is configured separately after selecting a repository.</p><div className="publisher-auth-row"><div><h3>GitHub App</h3><p>{status.github.connected ? status.github.name || 'Services GitHub App is connected.' : 'GitHub displays its own external consent screen. Review permissions and approve only the repositories you choose.'}</p></div>{status.github.connected ? <span className="publisher-badge good">Connected</span> : <span className="publisher-badge">Not connected</span>}</div>
               {!status.github.connected && <GitHubRegistration owner={registrationOwner} organization={organization} onOwner={next => { setRegistrationOwner(next); setManifest(null); setError('') }} onOrganization={next => { setOrganization(next); setManifest(null); setError('') }} onSubmit={event => { event.preventDefault(); startGitHub() }} />}
@@ -461,5 +483,5 @@ export function Publishers({ user, onBack, onAccounts, onLogout, sessionError }:
             {step === 4 && (selectedConnection ? <PublisherConnection connection={selectedConnection} busy={busy || !available} onTest={testPush} onRecover={recoverPush} onRepair={reviewRepair} onManage={manageConnection} /> : <p className="publisher-info">This connection was not present in the server’s latest response. Refresh to check its saved state.</p>)}
           </div></fieldset><PublisherFooter step={step} busy={busy} available={available} canAdvance={!!canAdvance} workflowNeeded={workflowNeeded} pendingWorkflow={!!prUrl} primaryLabel={primaryLabel} onReview={step === 3 && (!!plan || !!setupRepair) && !prUrl ? () => void perform(loadSetupReview) : undefined} onBack={() => step === 0 || step === 4 ? reset() : changeStep(step - 1)} onAdvance={advance} onCancel={reset} /></div></section>}
         </>}
-    </main>{repairId && status?.connections.find(connection => connection.id === repairId) && <PublisherRepair key={repairId} connection={status.connections.find(connection => connection.id === repairId)!} api={api} onStatus={setStatus} onBusy={setBusy} onClose={() => setRepairId('')} />}{deletionId && status?.connections.find(connection => connection.id === deletionId) && <PublisherDeletion key={deletionId} connection={status.connections.find(connection => connection.id === deletionId)!} api={api} onStatus={setStatus} onBusy={setBusy} onClose={() => setDeletionId('')} />}{confirmation && <PublisherConfirmation connection={confirmation.connection} action={confirmation.action} busy={busy} error={error} onCancel={() => { if (!lock.current) { setConfirmation(null); setError('') } }} onConfirm={confirmManagement} />}</AppShell>
+    </main>{renameId && status?.connections.find(connection => connection.id === renameId) && <PublisherReconciliation key={renameId} connection={status.connections.find(connection => connection.id === renameId)!} api={api} onStatus={setStatus} onBusy={setBusy} onClose={() => setRenameId('')} />}{repairId && status?.connections.find(connection => connection.id === repairId) && <PublisherRepair key={repairId} connection={status.connections.find(connection => connection.id === repairId)!} api={api} onStatus={setStatus} onBusy={setBusy} onClose={() => setRepairId('')} />}{deletionId && status?.connections.find(connection => connection.id === deletionId) && <PublisherDeletion key={deletionId} connection={status.connections.find(connection => connection.id === deletionId)!} api={api} onStatus={setStatus} onBusy={setBusy} onClose={() => setDeletionId('')} />}{confirmation && <PublisherConfirmation connection={confirmation.connection} action={confirmation.action} busy={busy} error={error} onCancel={() => { if (!lock.current) { setConfirmation(null); setError('') } }} onConfirm={confirmManagement} />}</AppShell>
 }

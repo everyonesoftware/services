@@ -19,6 +19,8 @@ import { DockerActivity } from './DockerActivity.tsx'
 import { ActivityFeed } from './ActivityFeed.tsx'
 import { PageHeader } from './PageHeader.tsx'
 import { FilterSearch, FilterToolbar, IconDropdown, ResetView } from './FilterToolbar.tsx'
+import type { PublisherStatus } from './publisherApi.ts'
+import { publisherHref, publisherNeedsAttention, publishersForContainers, publisherSignal } from './publisherReconciliation.ts'
 export { ProjectGroup, ServiceDetail, ContainerDetail, UpdateDialog, DockerActivity }
 
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed'
@@ -78,10 +80,13 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
   const iconsAvailable = iconsRequest.data?.available === true && !iconsRequest.error
 
   const monitorRequest = usePolling<Monitor>('/api/monitor', 15_000, resolutionPending || undoPending)
+  const publishersRequest = usePolling<PublisherStatus>('/api/publishers', 15_000)
+  const publishers = publishersRequest.data?.connections ?? []
+  const publisherAttention = publishers.filter(publisherNeedsAttention)
   const [acceptedOperations, setAcceptedOperations] = useState<Operation[]>([])
   const receivedOperations = useCallback((next: { operations: Operation[] }) => {
     setAcceptedOperations(current => current.filter(accepted => !next.operations.some(operation => operation.id === accepted.id)))
-  }, [])
+  }, [setAcceptedOperations])
   const operationsRequest = usePolling<{ operations: Operation[] }>('/api/operations', 2_000, false, receivedOperations)
   const polledOperations = operationsRequest.data?.operations
   const operations = [...(polledOperations ?? []), ...acceptedOperations.filter(accepted => !polledOperations?.some(operation => operation.id === accepted.id))]
@@ -133,15 +138,16 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
   const error = monitorRequest.error || projectsRequest.error
   const connection = connectionState(monitor, error, now)
   const connected = connection === 'connected'
-  const attention = projects.filter(needsAttention).length
+  const hasPublisherAttention = (project: Project) => publishersForContainers(publisherAttention, project.containers).length > 0
+  const attention = projects.filter(project => needsAttention(project) || hasPublisherAttention(project)).length
   const updates = projects.reduce((total, project) => total + availableServices(project).length, 0)
-  const visible = selectProjects(projects, query, filter)
+  const visible = selectProjects(projects, query, filter === 'attention' ? 'all' : filter).filter(project => filter !== 'attention' || needsAttention(project) || hasPublisherAttention(project))
   const incidents = monitor?.incidents ?? []
   const activeIncidents = incidents.filter(incident => incident.status !== 'missing' || !isSnoozed(incident.snoozedUntil, now))
   const missingIncidents = incidents.filter(incident => incident.status === 'missing')
   const snoozedMissing = missingIncidents.filter(incident => isSnoozed(incident.snoozedUntil, now))
   const events = monitor?.events ?? []
-  const refresh = () => { projectsRequest.refresh(); monitorRequest.refresh(); operationsRequest.refresh(); iconsRequest.refresh() }
+  const refresh = () => { projectsRequest.refresh(); monitorRequest.refresh(); operationsRequest.refresh(); iconsRequest.refresh(); publishersRequest.refresh() }
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 5_000); return () => window.clearInterval(timer) }, [])
 
   const resolve = (targets: Incident[], trigger: HTMLElement | null) => {
@@ -180,6 +186,7 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
     {!connected && <p className={`notice ${connection === 'connecting' ? '' : 'danger'}`} role={connection === 'connecting' ? 'status' : 'alert'}>{connection === 'connecting' ? 'Connecting…' : `Monitoring interrupted: ${error || monitor?.error || (connection === 'stale' ? 'Monitoring data is stale.' : 'Engine disconnected.')}. Last observed data is shown; current state cannot be confirmed.`}</p>}
   </>
   const detailProps = (project: Project) => ({
+    publishers: publishersForContainers(publishers, project.containers),
     project, onReview: (reviewed: Project) => setUpdateTarget({ project: reviewed }), icons: iconsRequest.data?.icons, iconsAvailable, onEditIcon: setIconTarget,
     onResolve: (container: Container, trigger: HTMLElement) => { const incident = missingIncidents.find(item => item.project === project.name && item.name === container.name && item.service === (container.service || '')); if (incident) resolve([incident], trigger) },
     resolveDisabled: !connected || undoPending || resolutionPending,
@@ -200,11 +207,13 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
     return <ContainerDetail {...detailProps(project)} container={container} />
   }
 
-  return <AppShell active={activePage} user={user} onAccounts={onAccounts} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} connection={<span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>}>
+  return <AppShell publisherAttention={publisherAttention.length} active={activePage} user={user} onAccounts={onAccounts} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} connection={<span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>}>
     {activePage === 'activity' ? <ActivityFeed operations={operations} events={events} operationsLoading={operationsRequest.loading} eventsLoading={monitorRequest.loading} operationsError={operationsRequest.error} eventsError={eventsError} now={now} onAcknowledged={operationsRequest.refresh} /> : route.kind !== 'monitor' ? renderDetail() : <main className="workspace">
       <Breadcrumb />
       <PageHeader title="Services" id="services-title" actions={<><button className="button secondary monitor-header-action" onClick={refresh} type="button" aria-label="Refresh" title="Refresh"><span aria-hidden="true">↻</span><span className="monitor-action-label">Refresh</span></button><button className="button primary monitor-header-action" onClick={() => void check()} disabled={checking || !connected} type="button" aria-label={checking ? 'Checking images…' : 'Check for updates'} title={checking ? 'Checking images…' : 'Check for updates'}><svg className="monitor-check-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" /></svg><span className="monitor-action-label">{checking ? 'Checking images…' : 'Check for updates'}</span></button></>} />
       {feedback}
+
+      {publisherAttention.length > 0 && <section className="publisher-attention" aria-label="Publisher attention"><div className="section-title"><h2>Needs attention <span className="count">{publisherAttention.length}</span></h2><span className="section-note">Publisher connections · runtime health is separate</span></div>{publishersRequest.error && <p className="notice danger">Publisher status could not be refreshed. Last observed attention is shown.</p>}<div className="publisher-attention-list">{publisherAttention.map(publisher => <article className="publisher-attention-item" key={publisher.id}><div><strong>{projects.filter(project => publishersForContainers([publisher], project.containers).length).map(project => project.name).join(', ') || publisher.repository.fullName}</strong><p>{publisherSignal(publisher)}. Running containers are unaffected by publisher reconciliation.</p><code>{publisher.imageRepository}</code></div><a className="button primary" href={publisherHref(publisher.id)}>{publisher.reconciliation?.state === 'awaiting_publication' ? 'View publisher status' : 'Review reconciliation'}</a></article>)}</div></section>}
 
       {incidents.length > 0 && <section className="incidents" aria-labelledby="incident-heading"><div className="section-title"><h2 id="incident-heading">{activeIncidents.length ? 'Needs attention' : 'Missing · alerts snoozed'} <span className="count">{activeIncidents.length || snoozedMissing.length}</span></h2><span className="section-note">{connected ? 'Observed incidents' : 'Last observed incidents'}</span></div><div className="incident-list">{incidents.map(incident => <article className={`incident ${incident.status === 'missing' && isSnoozed(incident.snoozedUntil, now) ? 'snoozed-incident' : ''}`} key={incident.id}><span className="incident-mark" aria-hidden="true">{incident.status === 'missing' && isSnoozed(incident.snoozedUntil, now) ? '◌' : '!'}</span><div className="incident-copy"><h3>{incident.project} <span>/</span> {incident.service || incident.name}</h3><p>{incident.reason || incident.status}</p>{incident.status === 'missing' && isSnoozed(incident.snoozedUntil, now) && <p>Missing · alerts snoozed until {new Date(incident.snoozedUntil!).toLocaleString()}</p>}</div><time title={incident.since}>Since {timeLabel(incident.since)}</time>{incident.status === 'missing' && <button className="button secondary incident-resolve" type="button" disabled={!connected || undoPending || resolutionPending} onClick={event => resolve([incident], event.currentTarget)}>Resolve…</button>}</article>)}</div>{missingIncidents.length > 1 && <div className="resolution-batch"><span>Review and handle missing entries together.</span><button className="button secondary" type="button" disabled={!connected || undoPending || resolutionPending} onClick={event => resolve(missingIncidents, event.currentTarget)}>Resolve {missingIncidents.length === 2 ? 'both' : 'all'} missing entries…</button></div>}</section>}
       <section id="services" aria-labelledby="services-title">

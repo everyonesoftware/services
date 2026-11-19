@@ -15,18 +15,19 @@ const (
 // ImagePublication records untrusted, validated image-publication provenance.
 // It describes a registry root manifest/index digest, not deployment authority.
 type ImagePublication struct {
-	SchemaVersion    int      `json:"schemaVersion"`
-	Repository       string   `json:"repository"`
-	Tags             []string `json:"tags"`
-	Digest           string   `json:"digest"`
-	Version          string   `json:"version,omitempty"`
-	SourceRepository string   `json:"sourceRepository"`
-	Commit           string   `json:"commit"`
-	Ref              string   `json:"ref"`
-	RunID            string   `json:"runId"`
-	RunAttempt       int      `json:"runAttempt"`
-	RunURL           string   `json:"runUrl"`
-	PublishedAt      string   `json:"publishedAt"`
+	SchemaVersion      int      `json:"schemaVersion"`
+	Repository         string   `json:"repository"`
+	Tags               []string `json:"tags"`
+	Digest             string   `json:"digest"`
+	Version            string   `json:"version,omitempty"`
+	SourceRepository   string   `json:"sourceRepository"`
+	SourceRepositoryID string   `json:"sourceRepositoryId,omitempty"`
+	Commit             string   `json:"commit"`
+	Ref                string   `json:"ref"`
+	RunID              string   `json:"runId"`
+	RunAttempt         int      `json:"runAttempt"`
+	RunURL             string   `json:"runUrl"`
+	PublishedAt        string   `json:"publishedAt"`
 }
 
 // Container is the Docker data needed for project health and image-update status.

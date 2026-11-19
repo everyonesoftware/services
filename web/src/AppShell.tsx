@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import './AppShell.css'
 
 export type AppPage = 'monitor' | 'activity' | 'publishers' | 'settings'
-type NavigationProps = { active: AppPage; onMonitor?: () => void; onActivity?: () => void; onPublishers?: () => void; onAccounts?: () => void; disabled?: boolean }
+type NavigationProps = { publisherAttention?: number; active: AppPage; onMonitor?: () => void; onActivity?: () => void; onPublishers?: () => void; onAccounts?: () => void; disabled?: boolean }
 type Props = NavigationProps & { user?: { username: string }; onLogout?: () => void; connection?: ReactNode; sessionError?: string; children: ReactNode }
 
 function NavigationIcon({ page }: { page: AppPage }) {
@@ -12,17 +12,17 @@ function NavigationIcon({ page }: { page: AppPage }) {
 
 const destinations = [['monitor', 'Monitor'], ['activity', 'Activity'], ['publishers', 'Publishers'], ['settings', 'Settings']] as const
 
-export function AppNavigation({ active, onMonitor, onActivity, onPublishers, onAccounts, disabled = false, mobile = false }: NavigationProps & { mobile?: boolean }) {
+export function AppNavigation({ publisherAttention = 0, active, onMonitor, onActivity, onPublishers, onAccounts, disabled = false, mobile = false }: NavigationProps & { mobile?: boolean }) {
   const actions = { monitor: onMonitor, activity: onActivity, publishers: onPublishers, settings: onAccounts }
   const items = mobile ? destinations : destinations.slice(0, 3)
   return <nav className={mobile ? 'mobile-navigation' : 'app-navigation'} aria-label={mobile ? 'Mobile navigation' : 'Main navigation'}>{items.map(([page, label]) => <a key={page} href={`#${page}`} aria-label={label} title={label} aria-current={active === page ? 'page' : undefined} aria-disabled={disabled || undefined} onClick={event => {
     const action = actions[page]
     if (disabled || action) event.preventDefault()
     if (!disabled) action?.()
-  }}><NavigationIcon page={page} /><span className="sidebar-label">{label}</span>{!mobile && <span className="sidebar-arrow" aria-hidden="true">›</span>}</a>)}</nav>
+  }}><NavigationIcon page={page} /><span className="sidebar-label">{label}</span>{page === 'publishers' && publisherAttention > 0 && <span className="publisher-attention-count" aria-label={`${publisherAttention} publishers need attention`}>{publisherAttention}</span>}{!mobile && <span className="sidebar-arrow" aria-hidden="true">›</span>}</a>)}</nav>
 }
 
-export function AppShell({ active, user, onMonitor, onActivity, onPublishers, onAccounts, onLogout, connection, sessionError, disabled = false, children }: Props) {
+export function AppShell({ publisherAttention, active, user, onMonitor, onActivity, onPublishers, onAccounts, onLogout, connection, sessionError, disabled = false, children }: Props) {
   return <div className="app-shell">
     <a className="skip-link" href="#page-content" onClick={event => { event.preventDefault(); document.getElementById('page-content')?.focus() }}>Skip to page content</a>
     <aside className="app-sidebar" aria-label="Workspace">
@@ -30,7 +30,7 @@ export function AppShell({ active, user, onMonitor, onActivity, onPublishers, on
         <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="sidebar-brand-name">services</span>
       </a>
 
-      <AppNavigation active={active} onMonitor={onMonitor} onActivity={onActivity} onPublishers={onPublishers} onAccounts={onAccounts} disabled={disabled} />
+      <AppNavigation publisherAttention={publisherAttention} active={active} onMonitor={onMonitor} onActivity={onActivity} onPublishers={onPublishers} onAccounts={onAccounts} disabled={disabled} />
       <div className="sidebar-footer">
         {connection && <div className="sidebar-connection">{connection}</div>}
         {user && <div className="sidebar-profile" title={`${user.username} · Administrator`}><span className="sidebar-avatar" aria-hidden="true">{Array.from(user.username)[0]?.toLocaleUpperCase()}</span><div className="sidebar-user-details"><strong className="sidebar-user">{user.username}</strong><span>Administrator</span></div><a className="sidebar-settings" href="#settings" aria-label="Settings" title="Settings" aria-current={active === 'settings' ? 'page' : undefined} aria-disabled={disabled || undefined} onClick={event => {
@@ -41,6 +41,6 @@ export function AppShell({ active, user, onMonitor, onActivity, onPublishers, on
       </div>
     </aside>
     <div className="app-content" id="page-content" tabIndex={-1}>{sessionError && <p role="alert" className="notice danger session-notice">{sessionError}</p>}{children}</div>
-    <AppNavigation active={active} onMonitor={onMonitor} onActivity={onActivity} onPublishers={onPublishers} onAccounts={onAccounts} disabled={disabled} mobile />
+    <AppNavigation publisherAttention={publisherAttention} active={active} onMonitor={onMonitor} onActivity={onActivity} onPublishers={onPublishers} onAccounts={onAccounts} disabled={disabled} mobile />
   </div>
 }
