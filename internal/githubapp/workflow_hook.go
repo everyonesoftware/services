@@ -228,6 +228,10 @@ func publicationBuildVersion(with *yaml.Node) (string, error) {
 // Arbitrary YAML/expressions are deliberately unsupported, not approximated by
 // substring checks that might approve a different producer or retained file.
 func validateNotificationHook(text string) error {
+	if strings.Contains(text, logsCaptureMarker) {
+		_, err := originalLogsWorkflow(text)
+		return err
+	}
 	fail := func(reason string) error {
 		return errors.New(reason + " Review the Services publication hook manually.")
 	}

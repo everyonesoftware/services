@@ -163,9 +163,11 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 		return planRemovalSnapshot(repo, s, paths, files)
 	}
 	hooks := 0
+	logsHook := false
 	for _, path := range paths {
 		if existingHook(files[path]) {
 			hooks++
+			logsHook = logsHook || strings.Contains(files[path], logsCaptureMarker)
 		} else if strings.Contains(files[path], "publish-notification.mjs") {
 			err := validateNotificationHook(files[path])
 			return problem("An existing Services hook is incomplete or custom: " + err.Error())
@@ -176,24 +178,37 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 	}
 	if hooks == 0 {
 		candidate := ""
+		logsCandidate := false
 		count := 0
 		for _, path := range paths {
 			root, e := workflowYAML(files[path])
 			if e != nil {
 				return problem(e.Error())
 			}
-			n := buildPushCount(root)
+			logsPushes := logsRegistryCount(root)
+			n := buildPushCount(root) + logsPushes
 			count += n
 			if n > 0 {
 				candidate = path
+				logsCandidate = logsPushes != 0
 			}
 		}
 		if count != 1 {
 			return problem("Expected exactly one Docker publication workflow; custom or ambiguous layouts require manual review.")
 		}
-		after, e := provisionConventionalWorkflow(files[candidate])
+		provision := provisionConventionalWorkflow
+		if logsCandidate {
+			provision = provisionLogsWorkflow
+		}
+		after, e := provision(files[candidate])
 		if e != nil {
 			return problem(e.Error())
+		}
+		if logsCandidate {
+			if e := validateNotificationHook(after); e != nil {
+				return problem(e.Error())
+			}
+			logsHook = true
 		}
 		s.plan.Files = append(s.plan.Files, WorkflowFile{Path: candidate, Before: files[candidate], After: after})
 		if files[senderPath] == "" {
@@ -203,6 +218,23 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 		}
 	} else if !supportedSender(files[senderPath]) {
 		return problem("The existing publication sender is missing or unsupported; review the existing hook manually.")
+	}
+	if logsHook {
+		before, _, e := o.workflowContent(repo, token, logsPublisherPath, s.sha)
+		if e != nil {
+			return s, e
+		}
+		files[logsPublisherPath] = before
+		after, e := provisionLogsPublisher(before)
+		if e != nil {
+			return problem(e.Error())
+		}
+		if after != before {
+			if hooks != 0 {
+				return problem("The installed Logs hook is missing verified registry outputs; review it manually.")
+			}
+			s.plan.Files = append(s.plan.Files, WorkflowFile{Path: logsPublisherPath, Before: before, After: after})
+		}
 	}
 	for _, entry := range []struct{ path, template string }{{connectionPath, connectionTemplate}, {callbackPath, callbackTemplate}} {
 		if files[entry.path] == "" {

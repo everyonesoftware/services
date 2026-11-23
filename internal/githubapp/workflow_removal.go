@@ -89,6 +89,9 @@ func decodedRemovalSignal(n *yaml.Node) bool {
 // Remove only structurally validated instrumentation. Source ranges, not YAML
 // serialization, preserve all surviving bytes, including pinned build actions.
 func removeWorkflowHook(text string) (string, error) {
+	if strings.Contains(text, logsCaptureMarker) {
+		return originalLogsWorkflow(text)
+	}
 	fail := func() (string, error) {
 		return "", errors.New("Custom or shared Services workflow requires manual review.")
 	}

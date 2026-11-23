@@ -47,11 +47,11 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 		}
 		files[path] = string(content)
 	}
-	// Provisioning can retain a conventional workflow's original filename.
-	// Preserve the legacy fast path, but inspect the pinned generated layout
-	// when the historical workflow is absent. A plan with pending changes is
-	// not installed and must not pass the final apply compatibility check.
-	if missingWorkflow {
+	workflow := files[".github/workflows/verify-and-publish.yml"]
+	// Provisioning can retain another filename. Logs also needs the pinned
+	// registry script checked even when using the historical workflow filename.
+	// A plan with pending changes is not an installed integration.
+	if missingWorkflow || strings.Contains(workflow, logsCaptureMarker) {
 		snapshot, err := o.planWorkflow(repository, token)
 		if err != nil {
 			return result, err
@@ -64,7 +64,6 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 		}
 		return Inspection{Problems: snapshot.plan.Problems}, nil
 	}
-	workflow := files[".github/workflows/verify-and-publish.yml"]
 	if workflow != "" {
 		if err := validateNotificationHook(workflow); err != nil {
 			result.Problems = append(result.Problems, "verify-and-publish.yml: "+err.Error())
