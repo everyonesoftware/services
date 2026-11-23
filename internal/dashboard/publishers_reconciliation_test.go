@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"path/filepath"
 	"services/internal/updates"
 	"testing"
@@ -69,6 +70,46 @@ func TestPublisherReviewedReconciliationRetainsLegacyHistory(t *testing.T) {
 	}
 	if _, err := checker.AcceptPublication(context.Background(), p); err == nil {
 		t.Fatal("old-name replay unexpectedly accepted")
+	}
+}
+
+func TestPublisherReviewSurvivesTransientStatusFailure(t *testing.T) {
+	s, _, store, base, cookie := publisherServer(t)
+	c := connectionForTest(t, s, store, cookie)
+	history := realPublisherReceiver(t, s)
+	p := reviewPublication(t)
+	checker := updates.NewChecker(nil, 0)
+	checker.SetPublicationStore(history)
+	if _, err := checker.AcceptPublication(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	provider := &repositoryDiscoveryProvider{publisherProviderFake: base}
+	s.publishers.provider = provider
+	base.repositories[0].FullName = "acme/renamed"
+	publisherRequest(s, "GET", "/api/publishers", nil, cookie, "")
+	path := "/api/publishers/" + c.ID + "/reconciliation"
+	w := publisherRequest(s, "POST", path+"/plan", map[string]any{}, cookie, "")
+	var plan publisherRepositoryReview
+	if err := json.Unmarshal(w.Body.Bytes(), &plan); err != nil || w.Code != http.StatusOK || !plan.RequiresApproval {
+		t.Fatalf("plan: %d %s", w.Code, w.Body.String())
+	}
+	provider.verifyErr = context.DeadlineExceeded
+	publisherRequest(s, "GET", "/api/publishers", nil, cookie, "")
+	state, err := store.Load()
+	if err != nil || state.Connections[0].Reconciliation.State != "unavailable" {
+		t.Fatalf("status failure was not saved: %v", err)
+	}
+	payload := map[string]any{"approved": true, "fingerprint": plan.Fingerprint}
+	if w := publisherRequest(s, "POST", path, payload, cookie, ""); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("apply must still require fresh authorization: %d %s", w.Code, w.Body.String())
+	}
+	provider.verifyErr = nil
+	if w := publisherRequest(s, "POST", path, payload, cookie, ""); w.Code != http.StatusOK {
+		t.Fatalf("unchanged authorized review rejected after observational status poll: %d %s", w.Code, w.Body.String())
+	}
+	b, err := history.PublicationRepositoryBinding(context.Background(), p.Repository)
+	if err != nil || b.SourceRepository != "acme/renamed" || b.RepositoryID != 12 || b.InstallationID != 7 {
+		t.Fatalf("binding not reconciled: %+v %v", b, err)
 	}
 }
 

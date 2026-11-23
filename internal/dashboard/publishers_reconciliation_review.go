@@ -80,9 +80,9 @@ func (s *Server) repositoryReview(ctx context.Context, state publishers.Snapshot
 	plan = publisherRepositoryReview{Repository: storedRepository(repo), ImageRepository: c.ImageRepository, PreviousName: previous, RequiresApproval: binding.SourceRepository != "" && binding.RepositoryID == 0}
 	if journal := c.ReconciliationReview; journal != nil {
 		expected := updates.PublicationBinding{ImageRepository: c.ImageRepository, SourceRepository: journal.ExpectedSource, RepositoryID: journal.ExpectedRepositoryID, InstallationID: journal.ExpectedInstallationID, Revision: journal.ExpectedRevision}
-		fingerprint, fingerprintErr := s.repositoryReviewFingerprint(state, c, expected, plan.Repository)
+		matches := s.repositoryReviewMatchesJournal(state, c, expected, plan.Repository)
 		alreadyApplied := binding.RepositoryID == repo.ID && binding.InstallationID == repo.InstallationID && binding.SourceRepository == repo.FullName && binding.Revision == expected.Revision+1
-		if fingerprintErr != nil || fingerprint != journal.Fingerprint || (binding != expected && !alreadyApplied) {
+		if !matches || (binding != expected && !alreadyApplied) {
 			return plan, binding, errPublisherReview
 		}
 		plan.PreviousName = expected.SourceRepository
@@ -95,6 +95,28 @@ func (s *Server) repositoryReview(ctx context.Context, state publishers.Snapshot
 }
 
 func (s *Server) repositoryReviewFingerprint(state publishers.Snapshot, c publishers.Connection, binding updates.PublicationBinding, repository publishers.Repository) (string, error) {
+	// Discovery polls can temporarily report unavailability without changing
+	// trust. PLAN and APPLY verify trust directly; the display status is not
+	// evidence. The delivery generation remains bound separately.
+	c.Reconciliation = nil
+	return s.repositoryReviewFingerprintWithStatus(state, c, binding, repository)
+}
+
+func (s *Server) repositoryReviewMatchesJournal(state publishers.Snapshot, c publishers.Connection, binding updates.PublicationBinding, repository publishers.Repository) bool {
+	fingerprint, err := s.repositoryReviewFingerprint(state, c, binding, repository)
+	if err != nil {
+		return false
+	}
+	if fingerprint == c.ReconciliationReview.Fingerprint {
+		return true
+	}
+	// Preserve recovery for already-durable journals created by older servers.
+	// Never accept this older fingerprint for a fresh approval.
+	legacy, err := s.repositoryReviewFingerprintWithStatus(state, c, binding, repository)
+	return err == nil && legacy == c.ReconciliationReview.Fingerprint
+}
+
+func (s *Server) repositoryReviewFingerprintWithStatus(state publishers.Snapshot, c publishers.Connection, binding updates.PublicationBinding, repository publishers.Repository) (string, error) {
 	keys, err := s.authStore.ListKeys()
 	if err != nil {
 		return "", errPublisherUnavailable
@@ -209,9 +231,8 @@ func (s *Server) publisherRepositoryReconciliation(w http.ResponseWriter, r *htt
 	journal := c.ReconciliationReview
 	if journal != nil && journal.Fingerprint == body.Fingerprint {
 		expected := updates.PublicationBinding{ImageRepository: c.ImageRepository, SourceRepository: journal.ExpectedSource, RepositoryID: journal.ExpectedRepositoryID, InstallationID: journal.ExpectedInstallationID, Revision: journal.ExpectedRevision}
-		fingerprint, fingerprintErr := s.repositoryReviewFingerprint(state, *c, expected, plan.Repository)
 		alreadyApplied := binding.RepositoryID == plan.Repository.ID && binding.InstallationID == plan.Repository.InstallationID && binding.SourceRepository == plan.Repository.FullName && binding.Revision == expected.Revision+1
-		if fingerprintErr != nil || fingerprint != body.Fingerprint || (binding != expected && !alreadyApplied) {
+		if !s.repositoryReviewMatchesJournal(state, *c, expected, plan.Repository) || (binding != expected && !alreadyApplied) {
 			publisherReconciliationError(w, errPublisherReview)
 			return
 		}

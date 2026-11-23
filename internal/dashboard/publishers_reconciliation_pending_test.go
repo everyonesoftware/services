@@ -11,7 +11,7 @@ import (
 )
 
 func TestPublisherPendingReviewPlanRevalidatesOriginalJournal(t *testing.T) {
-	for _, scenario := range []string{"expected", "next_revision", "branch", "key", "deletion", "state", "revision", "owner", "provider"} {
+	for _, scenario := range []string{"expected", "next_revision", "legacy_fingerprint", "branch", "key", "deletion", "state", "revision", "owner", "provider"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, keys, store, base, cookie := publisherServer(t)
 			c := connectionForTest(t, s, store, cookie)
@@ -22,6 +22,7 @@ func TestPublisherPendingReviewPlanRevalidatesOriginalJournal(t *testing.T) {
 				t.Fatal(err)
 			}
 			base.repositories[0].FullName = "acme/renamed"
+			publisherRequest(s, "GET", "/api/publishers", nil, cookie, "")
 			path := "/api/publishers/" + c.ID + "/reconciliation/plan"
 			w := publisherRequest(s, "POST", path, map[string]any{}, cookie, "")
 			var plan publisherRepositoryReview
@@ -33,6 +34,13 @@ func TestPublisherPendingReviewPlanRevalidatesOriginalJournal(t *testing.T) {
 				t.Fatal(err)
 			}
 			state, _ := store.Load()
+			if scenario == "legacy_fingerprint" {
+				legacy, err := s.repositoryReviewFingerprintWithStatus(state, state.Connections[0], b, plan.Repository)
+				if err != nil || legacy == plan.Fingerprint {
+					t.Fatalf("fixture needs a distinct legacy fingerprint: %v", err)
+				}
+				plan.Fingerprint = legacy
+			}
 			state.Connections[0].ReconciliationReview = &publishers.ReconciliationReview{Fingerprint: plan.Fingerprint, ExpectedSource: b.SourceRepository, ExpectedRepositoryID: b.RepositoryID, ExpectedInstallationID: b.InstallationID, ExpectedRevision: b.Revision, EligibleAfter: time.Now().UTC().Format(time.RFC3339Nano)}
 			if scenario != "expected" {
 				if err := history.ReconcilePublicationRepository(context.Background(), b, 12, 7, "acme/renamed"); err != nil {
@@ -68,7 +76,7 @@ func TestPublisherPendingReviewPlanRevalidatesOriginalJournal(t *testing.T) {
 				t.Fatal(err)
 			}
 			w = publisherRequest(s, "POST", path, map[string]any{}, cookie, "")
-			if scenario != "expected" && scenario != "next_revision" {
+			if scenario != "expected" && scenario != "next_revision" && scenario != "legacy_fingerprint" {
 				if w.Code == 200 {
 					t.Fatalf("changed trust exposed reusable pending approval: %s", w.Body.String())
 				}
@@ -77,6 +85,13 @@ func TestPublisherPendingReviewPlanRevalidatesOriginalJournal(t *testing.T) {
 			var recovery publisherRepositoryReview
 			if err := json.Unmarshal(w.Body.Bytes(), &recovery); err != nil || w.Code != 200 || !recovery.RequiresApproval || recovery.Fingerprint != plan.Fingerprint || recovery.PreviousName != "acme/app" {
 				t.Fatalf("pending plan: %d %s", w.Code, w.Body.String())
+			}
+			if scenario == "legacy_fingerprint" {
+				apply := "/api/publishers/" + c.ID + "/reconciliation"
+				w := publisherRequest(s, "POST", apply, map[string]any{"fingerprint": recovery.Fingerprint, "approved": true}, cookie, "")
+				if w.Code != 200 {
+					t.Fatalf("legacy journal apply: %d %s", w.Code, w.Body.String())
+				}
 			}
 		})
 	}
