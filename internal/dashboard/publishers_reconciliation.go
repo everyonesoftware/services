@@ -123,6 +123,13 @@ func (s *Server) discoverPublisherRepositories(parent context.Context, state *pu
 				changed = true
 				continue
 			}
+			if c.Reconciliation != nil && (c.Reconciliation.State == "unavailable" || c.Reconciliation.State == "awaiting_publication") &&
+				previousName == repo.FullName && binding.SourceRepository == repo.FullName && binding.ImageRepository == c.ImageRepository &&
+				binding.RepositoryID == repo.ID && binding.InstallationID == repo.InstallationID && binding.Revision > 0 && publisherHasCurrentReconciliationReceipt(*c) {
+				c.Reconciliation = publisherReconciliation(*c, repo.FullName, "reconciled")
+				changed = true
+				continue
+			}
 			recovering := c.Reconciliation != nil && c.Reconciliation.State != "awaiting_publication" && c.Reconciliation.State != "reconciled"
 			if (binding.SourceRepository == "" && binding.RepositoryID == 0) || (binding.RepositoryID == repo.ID && binding.InstallationID == repo.InstallationID && (binding.SourceRepository != repo.FullName || previousName != repo.FullName || recovering)) {
 				if bindingErr = reconcileAndReadPublicationBinding(ctx, bindingProvider, binding, storedRepository(repo)); bindingErr != nil {

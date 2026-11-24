@@ -59,6 +59,41 @@ func TestPublisherBoundRenameAutomaticallyReconcilesAndRequiresFreshReceipt(t *t
 	if saved.Connections[0].Reconciliation.State != "reconciled" {
 		t.Fatal("fresh receipt did not complete reconciliation")
 	}
+
+	readStatus := func(t *testing.T, want string, wantReceipt bool) {
+		t.Helper()
+		w := publisherRequest(s, "GET", "/api/publishers", nil, cookie, "")
+		var response struct{ Connections []publisherConnectionView }
+		if err := json.Unmarshal(w.Body.Bytes(), &response); w.Code != 200 || err != nil || len(response.Connections) != 1 {
+			t.Fatalf("publisher status: HTTP %d, decode %v, rows %d", w.Code, err, len(response.Connections))
+		}
+		got := response.Connections[0]
+		if got.Reconciliation == nil || got.Reconciliation.State != want || (got.LastPublication != nil) != wantReceipt {
+			t.Fatalf("reconciliation = %+v, receipt present = %v; want %s, receipt present = %v", got.Reconciliation, got.LastPublication != nil, want, wantReceipt)
+		}
+	}
+	t.Run("provider recovery preserves verified delivery", func(t *testing.T) {
+		s.publishers.provider = &repositoryDiscoveryProvider{publisherProviderFake: provider, repositoriesErr: errPublisherUnavailable}
+		readStatus(t, "unavailable", true)
+		s.publishers.provider = provider
+		readStatus(t, "reconciled", true)
+	})
+	t.Run("already stranded receipt heals without another publication", func(t *testing.T) {
+		stranded := saved
+		stranded.Connections[0].Reconciliation = publisherReconciliation(stranded.Connections[0], "acme/renamed", "awaiting_publication")
+		if err := store.Save(stranded); err != nil {
+			t.Fatal(err)
+		}
+		readStatus(t, "reconciled", true)
+	})
+	t.Run("another rename still requires a new receipt", func(t *testing.T) {
+		provider.repositories[0].FullName = "acme/again"
+		readStatus(t, "awaiting_publication", false)
+		s.publishers.provider = &repositoryDiscoveryProvider{publisherProviderFake: provider, repositoriesErr: errPublisherUnavailable}
+		readStatus(t, "unavailable", false)
+		s.publishers.provider = provider
+		readStatus(t, "awaiting_publication", false)
+	})
 }
 
 func TestPublisherRenameHidesPreRenameReceiptEvenWithFuturePublicationClock(t *testing.T) {

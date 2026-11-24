@@ -69,22 +69,26 @@ func connectionView(c publishers.Connection) publisherConnectionView {
 		view.Reconciliation.Message = "Repository reconciliation has a pending durable approval. Retry the reviewed operation or request a fresh review."
 		view.LastPublication = nil
 	}
-	if c.PublicationEligibleAfter != "" {
-		boundary, boundaryErr := time.Parse(time.RFC3339Nano, c.PublicationEligibleAfter)
-		if c.LastPublication == nil {
-			view.LastPublication = nil
-		} else {
-			published, publishedErr := time.Parse(time.RFC3339Nano, c.LastPublication.PublishedAt)
-			if c.LastPublicationReconciliation != c.PublicationEligibleAfter || boundaryErr != nil || publishedErr != nil || published.Before(boundary) {
-				view.LastPublication = nil
-			}
-		}
+	if c.PublicationEligibleAfter != "" && !publisherHasCurrentReconciliationReceipt(c) {
+		view.LastPublication = nil
 	}
 	if c.Deletion != nil {
 		view.Deletion = &publisherDeletionView{PRURL: c.Deletion.PRURL, WorkflowVerified: c.Deletion.WorkflowVerified, TailscaleConfirmed: c.Deletion.TailscaleConfirmed, TailscaleRevocationAttested: publisherTailscaleRevocationAttested(c)}
 	}
 	return view
 }
+
+// Receipt ingestion records the reconciliation generation only after checking
+// the original receiver acceptance time and the publication timestamp.
+func publisherHasCurrentReconciliationReceipt(c publishers.Connection) bool {
+	if c.PublicationEligibleAfter == "" || c.LastPublication == nil || c.LastPublicationReconciliation != c.PublicationEligibleAfter {
+		return false
+	}
+	boundary, boundaryErr := time.Parse(time.RFC3339Nano, c.PublicationEligibleAfter)
+	published, publishedErr := time.Parse(time.RFC3339Nano, c.LastPublication.PublishedAt)
+	return boundaryErr == nil && publishedErr == nil && !published.Before(boundary)
+}
+
 func publisherCredentialMatches(key auth.APIKey, c publishers.Connection) bool {
 	return key.ID == c.KeyID && len(key.Scopes) == 1 && key.Scopes[0] == "publications:write" && len(key.Repositories) == 1 && key.Repositories[0] == c.ImageRepository
 }
