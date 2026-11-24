@@ -10,13 +10,14 @@ import { canDeleteUser, keyPayload } from './authAccountModel.ts'
 const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : 'Request failed. Please try again.'
 const dateLabel = (value?: string) => value ? new Date(value).toLocaleString() : 'Never'
 
-type Props = { user: AuthUser; onBack: () => void; onPublishers?: () => void; onLogout: () => void; onPasswordChanged: () => void; sessionError?: string }
-export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordChanged, sessionError }: Props) {
+type Props = { user: AuthUser; onBack: () => void; onPublishers?: () => void; onLogout: () => Promise<void>; onPasswordChanged: () => void }
+export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordChanged }: Props) {
   const [users, setUsers] = useState<AuthUser[]>([])
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [signoutError, setSignoutError] = useState('')
   const [notice, setNotice] = useState('')
   const [token, setToken] = useState('')
   const [publisher, setPublisher] = useState(false)
@@ -32,10 +33,10 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
     }).catch(cause => { if (active) setError(errorMessage(cause)) })
     return () => { active = false }
   }, [])
-  const perform = async (action: () => Promise<void>) => {
+  const perform = async (action: () => Promise<void>, reportError = setError) => {
     if (busy) return
-    setBusy(true); setError(''); setNotice('')
-    try { await action() } catch (cause) { setError(errorMessage(cause)) }
+    setBusy(true); reportError(''); setNotice('')
+    try { await action() } catch (cause) { reportError(errorMessage(cause)) }
     finally { setBusy(false) }
   }
   const addUser = (event: FormEvent<HTMLFormElement>) => {
@@ -66,7 +67,7 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
       await load()
     })
   }
-  return <AppShell active="settings" user={user} onMonitor={onBack} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} disabled={busy}>
+  return <AppShell active="settings" user={user} onMonitor={onBack} onPublishers={onPublishers} disabled={busy}>
     <main className="workspace accounts-workspace"><PageHeader title="Settings" actions={section !== 'Updates' && <button className="button secondary" disabled={busy} onClick={() => void perform(load)}>Refresh</button>} />
     {error && <p role="alert" className="notice danger">{error}</p>}{notice && <p role="status" className="notice">{notice}</p>}
     <nav className="account-sections" aria-label="Settings sections">{['Updates', 'Administrators', 'API keys', 'Password'].map(name => <button type="button" key={name} aria-pressed={section === name} disabled={busy} onClick={() => setSection(name)}>{name}</button>)}</nav>
@@ -83,5 +84,11 @@ export function AuthAccounts({ user, onBack, onPublishers, onLogout, onPasswordC
       if (window.confirm(`Revoke API key ${key.name}? Clients using it will lose access.`)) void perform(async () => { await authRequest(`/keys/${encodeURIComponent(key.id)}`, { method: 'DELETE' }); setToken(''); await load(); setNotice('API key revoked.') })
     }}>Revoke<span className="sr-only"> {key.name}</span></button></li>)}</ul>}
     <form className="auth-form key-form" onSubmit={createKey}><h3>Create API key</h3><label>Key name<input className="icon-url" name="name" required /></label><fieldset><legend>Scopes</legend>{['services:read', 'publications:write'].map(scope => <label className="auth-checkbox" key={scope}><input name="scopes" type="checkbox" value={scope} onChange={scope === 'publications:write' ? event => setPublisher(event.target.checked) : undefined} />{scope}</label>)}</fieldset><label>Exact image repositories<textarea className="icon-url" name="repositories" rows={3} required={publisher} placeholder="ghcr.io/acme/site, ghcr.io/acme/worker" /></label><p className="auth-help">Comma or newline separated. Required for publications:write. No tags, digests or wildcards.</p><label>Expiry (optional, local time)<input className="icon-url" name="expiresAt" type="datetime-local" /></label><button className="button primary" disabled={busy || !loaded || !!token}>Create API key</button>{token && <p className="auth-help">Save and dismiss the current token before creating another.</p>}</form>
-    </section><section className="mobile-account" aria-label="Signed-in administrator"><div><span>Signed in as</span><strong>{user.username}</strong></div><button className="button secondary" type="button" disabled={busy} onClick={onLogout}>Sign out</button></section></main></AppShell>
+    </section>
+    <section className="auth-card signout-card" aria-labelledby="signout-title">
+      <h2 id="signout-title">Sign out</h2>
+      <p className="auth-help">Signed in as <strong>{user.username}</strong></p>
+      {signoutError && <p role="alert" className="notice danger">{signoutError}</p>}
+      <button className="button secondary" type="button" disabled={busy} onClick={() => void perform(onLogout, setSignoutError)}>Sign out</button>
+    </section></main></AppShell>
 }

@@ -78,11 +78,11 @@ export function AuthGate() {
     return () => { active = false; window.fetch = original; window.removeEventListener(sessionExpiredEvent, expired) }
   }, [user])
   const logout = async () => {
-    try { await authRequest('/logout', { method: 'POST', body: {} }); setUser(null); setPage('monitor'); setError(''); setSetup(false) }
-    catch (cause) { setError(message(cause)) }
+    await authRequest('/logout', { method: 'POST', body: {} })
+    setUser(null); setPage('monitor'); setError(''); setSetup(false)
   }
   if (loading) return <main className="auth-shell" role="status">Checking session…</main>
   if (error && !user) return <main className="auth-shell"><section className="auth-card"><p role="alert" className="notice danger">{error}</p><button className="button secondary" onClick={() => setRevision(value => value + 1)}>Try again</button></section></main>
   if (!user) return <AuthForm key={setup ? 'setup' : 'login'} setup={setup} onAuthenticated={setUser} />
-  return page === 'settings' ? <AuthAccounts user={user} sessionError={error} onBack={() => navigate('monitor')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} onPasswordChanged={() => { setUser(null); navigate('monitor'); setSetup(false) }} /> : page === 'publishers' ? <Publishers user={user} sessionError={error} onBack={() => navigate('monitor')} onAccounts={() => navigate('settings')} onLogout={() => void logout()} /> : <App activePage={page} user={user} sessionError={error} onAccounts={() => navigate('settings')} onPublishers={() => navigate('publishers')} onLogout={() => void logout()} />
+  return page === 'settings' ? <AuthAccounts user={user} onBack={() => navigate('monitor')} onPublishers={() => navigate('publishers')} onLogout={logout} onPasswordChanged={() => { setUser(null); navigate('monitor'); setSetup(false) }} /> : page === 'publishers' ? <Publishers user={user} onBack={() => navigate('monitor')} onAccounts={() => navigate('settings')} /> : <App activePage={page} user={user} onAccounts={() => navigate('settings')} onPublishers={() => navigate('publishers')} />
 }

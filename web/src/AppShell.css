@@ -22,12 +22,10 @@
 .sidebar-settings:focus-visible { outline: 2px solid #b6dbbf; outline-offset: 2px; }
 .sidebar-user { display: block; color: #e0e8e1; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .sidebar-user-details > span { display: block; font-size: 10px; color: #9aaca1; margin-top: 2px; }
-.sidebar-signout { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 14px 2px 0; border: 0; background: none; color: inherit; text-align: left; font-size: 12px; }
-.sidebar-signout .sidebar-icon { width: 16px; height: 16px; }
-.sidebar-signout:hover:not(:disabled) { color: #fff; }
+
 .app-content { position: relative; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
 .app-content:focus { outline: none; }
-.app-content > .session-notice { position: sticky; top: 16px; z-index: 2; margin: 24px 36px 0; }
+
 .app-content > .workspace { width: 100%; max-width: 1352px; margin: 0 auto; padding: 32px 36px; }
 .app-content .page-heading { padding-bottom: 23px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
 .app-content h1 { font-size: 24px; letter-spacing: -1px; }
@@ -60,6 +58,8 @@
 .app-content .accounts-grid { display: block; }
 .app-content .keys-card { margin-top: 0; }
 .app-content .accounts-workspace > .auth-card, .app-content .accounts-grid > .auth-card { max-width: 960px; }
+.signout-card { display: grid; justify-items: start; gap: 12px; margin-top: 18px; overflow-wrap: anywhere; }
+.signout-card .notice { margin: 0; }
 .app-content .auth-form:not(.key-form) { max-width: 520px; }
 .app-content .auth-form input { min-width: 0; }
 @media (max-width: 1050px) {
@@ -89,9 +89,7 @@
   .sidebar-profile { padding-top: 16px; flex-direction: column; gap: 6px; }
   .sidebar-settings { margin-left: 0; }
   .sidebar-user-details { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .sidebar-signout { justify-content: center; padding: 12px 0 0; }
   .app-content > .workspace { padding: 22px 16px; }
-  .app-content > .session-notice { margin: 22px 16px 0; }
   .app-content .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; padding-bottom: 20px; }
   .app-content .heading-actions { width: 100%; }
   .app-content .heading-actions .button { min-width: 0; white-space: normal; }

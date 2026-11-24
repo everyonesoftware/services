@@ -7,6 +7,7 @@ import type { IconEditorTarget } from './ServiceIcon.tsx'
 import { serviceHref } from './navigation.ts'
 import { PublisherLinks } from './PublisherReconciliation.tsx'
 import type { Connection } from './publisherApi.ts'
+import { publisherNeedsAttention } from './publisherReconciliation.ts'
 
 export type IconEditingProps = { icons?: Icon[]; iconsAvailable?: boolean; onEditIcon?: (target: IconEditorTarget) => void }
 export type ResolutionProps = { onResolve?: (container: Container, trigger: HTMLElement) => void; resolveDisabled?: boolean }
@@ -45,6 +46,6 @@ export function ProjectGroup(props: ProjectGroupProps) {
       <a className="project-link" href={serviceHref(project.name)}><span className="group-identity"><strong className="identity-name"><span>{project.name}</span></strong><span className="project-metadata"><span className="project-summary-counts">{project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</span><span className="group-signals project-health"><StatusBadge status={status} /></span></span></span><span className="navigation-arrow" aria-hidden="true">›</span></a>
       <span className="group-signals project-signals"><ProjectUpdateButton {...props} /></span>
     </div>
-    <PublisherLinks connections={props.publishers ?? []} />
+    <PublisherLinks connections={(props.publishers ?? []).filter(publisher => publisher.reconciliation?.state !== 'reconciled' || publisherNeedsAttention(publisher))} />
   </article>
 }

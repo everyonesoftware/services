@@ -1,5 +1,5 @@
 /* Shared mobile vocabulary. Component layouts remain in their own stylesheets. */
-.mobile-navigation, .mobile-account, .monitor-check-icon { display: none; }
+.mobile-navigation, .monitor-check-icon { display: none; }
 
 @media (max-width: 640px) {
   body { min-width: 0; }
@@ -8,7 +8,7 @@
   .app-shell > .app-sidebar { display: none; }
   .app-shell > .app-content { grid-column: 1; grid-row: 1; scrollbar-gutter: auto; }
   .app-content > .workspace { padding: 16px 16px 24px; }
-  .app-content > .session-notice { top: 8px; margin: 8px 16px; z-index: 4; }
+
   .mobile-navigation { grid-column: 1; grid-row: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; min-height: calc(68px + env(safe-area-inset-bottom, 0px)); padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); background: #1d302b; color: #cedbd1; border-top: 1px solid #354c40; }
   .mobile-navigation a { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-width: 0; min-height: 59px; padding: 5px 0; border-radius: 6px; font-size: 12px; line-height: 16px; color: inherit; text-decoration: none; }
   .mobile-navigation .sidebar-icon { width: 22px; height: 22px; }
@@ -51,10 +51,7 @@
   .auth-list li > div { flex: 1 1 160px; }
   .auth-list strong { font-size: 18px; }
   .auth-list code, .key-reveal label { font-size: 14px; }
-  .mobile-account { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--border); margin-top: 24px; padding-top: 18px; }
-  .mobile-account > div { min-width: 0; display: grid; gap: 3px; overflow-wrap: anywhere; }
-  .mobile-account span { font-size: 14px; color: var(--muted); }
-  .mobile-account strong { font-size: 16px; }
+
   .empty-state h3 { font-size: 18px; }
   .empty-state p { font-size: 16px; }
   .section-title h2 { font-size: 18px; }

@@ -71,6 +71,23 @@ test('same-name reconciled signals do not invent a rename', async () => {
   assert.equal(publisherSignal({ ...connection, reconciliation: { ...reconciliation, state: 'reconciled', previousName: repository.fullName } }), 'Publisher identity reconciled')
   assert.equal(publisherSignal({ ...connection, reconciliation: { ...reconciliation, state: 'reconciled' } }), 'Publisher rename reconciled')
 })
+
+test('Monitor project rows omit completed reconciliation without hiding publisher warnings', async () => {
+  const { createElement } = await import('react')
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  const { ProjectGroup } = await server.ssrLoadModule('/src/ProjectGroup.tsx')
+  const project = { name: 'Fixture', status: 'healthy', containers: [{ name: 'web', image: 'ghcr.io/acme/app:latest', state: 'running', health: 'healthy' }] }
+  const render = publisher => renderToStaticMarkup(createElement(ProjectGroup, { project, publishers: [publisher] }))
+  for (const previousName of [repository.fullName, reconciliation.previousName]) {
+    const completed = { ...connection, reconciliation: { ...reconciliation, previousName, state: 'reconciled' } }
+    const html = render(completed)
+    assert.doesNotMatch(html, /publisher-signals|Publisher (identity|rename) reconciled/)
+    assert.match(html, />Healthy</)
+    assert.match(render({ ...completed, state: 'error' }), />Publisher needs attention</)
+  }
+  assert.match(render(connection), />Publisher needs reconciliation</)
+  assert.match(render({ ...connection, reconciliation: { ...reconciliation, state: 'awaiting_publication' } }), />Publisher awaiting publication</)
+})
 test('retained receipts do not claim rename delivery while awaiting a new publication', async () => {
   const { createElement } = await import('react')
   const { renderToStaticMarkup } = await import('react-dom/server')

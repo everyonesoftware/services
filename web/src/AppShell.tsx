@@ -3,7 +3,7 @@ import './AppShell.css'
 
 export type AppPage = 'monitor' | 'activity' | 'publishers' | 'settings'
 type NavigationProps = { publisherAttention?: number; active: AppPage; onMonitor?: () => void; onActivity?: () => void; onPublishers?: () => void; onAccounts?: () => void; disabled?: boolean }
-type Props = NavigationProps & { user?: { username: string }; onLogout?: () => void; connection?: ReactNode; sessionError?: string; children: ReactNode }
+type Props = NavigationProps & { user?: { username: string }; connection?: ReactNode; children: ReactNode }
 
 function NavigationIcon({ page }: { page: AppPage }) {
   if (page === 'settings') return <svg className="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-.6 2.4-1.6.9-2.4-.6-3 5.2 1.8 1.7v1.8L1.4 16l3 5.2 2.4-.6 1.6.9L9 24h6l.6-2.5 1.6-.9 2.4.6 3-5.2-1.8-1.6v-1.8l1.8-1.7-3-5.2-2.4.6-1.6-.9L15 3Z" transform="translate(2 0) scale(.83)" /><circle cx="12" cy="11.2" r="3.2" /></svg>
@@ -22,7 +22,7 @@ export function AppNavigation({ publisherAttention = 0, active, onMonitor, onAct
   }}><NavigationIcon page={page} /><span className="sidebar-label">{label}</span>{page === 'publishers' && publisherAttention > 0 && <span className="publisher-attention-count" aria-label={`${publisherAttention} publishers need attention`}>{publisherAttention}</span>}{!mobile && <span className="sidebar-arrow" aria-hidden="true">›</span>}</a>)}</nav>
 }
 
-export function AppShell({ publisherAttention, active, user, onMonitor, onActivity, onPublishers, onAccounts, onLogout, connection, sessionError, disabled = false, children }: Props) {
+export function AppShell({ publisherAttention, active, user, onMonitor, onActivity, onPublishers, onAccounts, connection, disabled = false, children }: Props) {
   return <div className="app-shell">
     <a className="skip-link" href="#page-content" onClick={event => { event.preventDefault(); document.getElementById('page-content')?.focus() }}>Skip to page content</a>
     <aside className="app-sidebar" aria-label="Workspace">
@@ -37,10 +37,10 @@ export function AppShell({ publisherAttention, active, user, onMonitor, onActivi
           if (disabled || onAccounts) event.preventDefault()
           if (!disabled) onAccounts?.()
         }}><svg className="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-.6 2.4-1.6.9-2.4-.6-3 5.2 1.8 1.7v1.8L1.4 16l3 5.2 2.4-.6 1.6.9L9 24h6l.6-2.5 1.6-.9 2.4.6 3-5.2-1.8-1.6v-1.8l1.8-1.7-3-5.2-2.4.6-1.6-.9L15 3Z" transform="translate(2 0) scale(.83)" /><circle cx="12" cy="11.2" r="3.2" /></svg></a></div>}
-        {onLogout && <button type="button" className="sidebar-signout" aria-label="Sign out" title="Sign out" onClick={onLogout} disabled={disabled}><svg className="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v14h4M13 8l4 4-4 4M8 12h13" /></svg><span className="sidebar-label">Sign out</span></button>}
+
       </div>
     </aside>
-    <div className="app-content" id="page-content" tabIndex={-1}>{sessionError && <p role="alert" className="notice danger session-notice">{sessionError}</p>}{children}</div>
+    <div className="app-content" id="page-content" tabIndex={-1}>{children}</div>
     <AppNavigation publisherAttention={publisherAttention} active={active} onMonitor={onMonitor} onActivity={onActivity} onPublishers={onPublishers} onAccounts={onAccounts} disabled={disabled} mobile />
   </div>
 }

@@ -67,8 +67,8 @@ function usePolling<T>(url: string, interval: number, paused = false, onReceived
   return { data: snapshot.data, dataKey: snapshot.key, refreshing: snapshot.key !== refreshKey, error, loading, refresh, replace, invalidate }
 }
 
-type AppProps = { activePage?: 'monitor' | 'activity'; user?: { username: string }; onAccounts?: () => void; onPublishers?: () => void; onLogout?: () => void; sessionError?: string }
-export default function App({ activePage = 'monitor', user, onAccounts, onPublishers, onLogout, sessionError }: AppProps = {}) {
+type AppProps = { activePage?: 'monitor' | 'activity'; user?: { username: string }; onAccounts?: () => void; onPublishers?: () => void }
+export default function App({ activePage = 'monitor', user, onAccounts, onPublishers }: AppProps = {}) {
   const [iconTarget, setIconTarget] = useState<IconEditorTarget | null>(null)
   const [resolutionTarget, setResolutionTarget] = useState<ResolutionTarget | null>(null)
   const [resolutionPending, setResolutionPending] = useState(false)
@@ -207,7 +207,7 @@ export default function App({ activePage = 'monitor', user, onAccounts, onPublis
     return <ContainerDetail {...detailProps(project)} container={container} />
   }
 
-  return <AppShell publisherAttention={publisherAttention.length} active={activePage} user={user} onAccounts={onAccounts} onPublishers={onPublishers} onLogout={onLogout} sessionError={sessionError} connection={<span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>}>
+  return <AppShell publisherAttention={publisherAttention.length} active={activePage} user={user} onAccounts={onAccounts} onPublishers={onPublishers} connection={<span className={`connection ${connected ? 'good' : 'muted'}`}><i />{connection === 'connected' ? 'Engine connected' : connection === 'connecting' ? 'Connecting' : connection === 'stale' ? 'Data stale' : 'Engine disconnected'}</span>}>
     {activePage === 'activity' ? <ActivityFeed operations={operations} events={events} operationsLoading={operationsRequest.loading} eventsLoading={monitorRequest.loading} operationsError={operationsRequest.error} eventsError={eventsError} now={now} onAcknowledged={operationsRequest.refresh} /> : route.kind !== 'monitor' ? renderDetail() : <main className="workspace">
       <PageHeader title="Services" id="services-title" actions={<><button className="button secondary monitor-header-action" onClick={refresh} type="button" aria-label="Refresh" title="Refresh"><span aria-hidden="true">↻</span><span className="monitor-action-label">Refresh</span></button><button className="button primary monitor-header-action" onClick={() => void check()} disabled={checking || !connected} type="button" aria-label={checking ? 'Checking images…' : 'Check for updates'} title={checking ? 'Checking images…' : 'Check for updates'}><svg className="monitor-check-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" /></svg><span className="monitor-action-label">{checking ? 'Checking images…' : 'Check for updates'}</span></button></>} />
       {feedback}

@@ -75,6 +75,7 @@ async function exercise(viewport) {
     const sections = page.getByRole('navigation', { name: 'Settings sections' })
     for (const name of ['Updates', 'Administrators', 'API keys', 'Password']) {
       await sections.getByRole('button', { name, exact: true }).click()
+      assert.equal(await page.getByRole('region', { name: 'Sign out', exact: true }).getByText(user.username, { exact: true }).isVisible(), true)
       const geometry = await measure()
       assert.equal(geometry.contentOverflow, false, `Settings/${name} overflow`)
       if (mobile) {
@@ -94,14 +95,14 @@ async function exercise(viewport) {
     assert.equal(await page.getByLabel('Username', { exact: true }).inputValue(), 'Draft retained')
     if (mobile) {
       assert.ok(await page.getByLabel('Username', { exact: true }).evaluate(e => parseFloat(getComputedStyle(e).fontSize)) >= 16)
-      assert.equal(await page.locator('.mobile-account').getByText(user.username, { exact: true }).isVisible(), true)
+
       await nav.getByRole('link', { name: 'Monitor', exact: true }).click()
       await page.locator('.project-group').first().waitFor()
       const before = await nav.boundingBox()
       await page.locator('.app-content').evaluate(e => { e.scrollTop = e.scrollHeight })
       assert.deepEqual(await nav.boundingBox(), before, 'Bottom navigation stays stationary while content scrolls')
       await nav.getByRole('link', { name: 'Settings', exact: true }).click()
-      await page.locator('.mobile-account').getByRole('button', { name: 'Sign out', exact: true }).click()
+      await page.getByRole('region', { name: 'Sign out', exact: true }).getByRole('button', { name: 'Sign out', exact: true }).click()
       await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor()
       assert.deepEqual(writes, ['POST /api/auth/logout'])
     } else assert.deepEqual(writes, [])

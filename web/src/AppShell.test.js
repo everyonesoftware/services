@@ -29,9 +29,9 @@ for (const [component, active] of [[App, 'monitor'], [App, 'activity'], [Publish
     assert.equal(links.filter(match => match[0].includes('aria-current="page"')).length, 1)
     assert.ok(links.find(match => match[1] === active)[0].includes('aria-current="page"'))
     assert.match(sidebar, /class="sidebar-user"[^>]*>&lt;Admin &amp; user&gt;</)
-    assert.match(sidebar, /class="sidebar-signout"/)
+    assert.doesNotMatch(sidebar, /Sign out/)
     assert.ok(sidebar.indexOf('sidebar-user') > sidebar.indexOf('</nav>'))
-    assert.ok(sidebar.indexOf('sidebar-signout') > sidebar.indexOf('sidebar-user'))
+    if (active !== 'settings') assert.doesNotMatch(html, /Sign out/)
     assert.match(html, /class="app-content"/)
     assert.doesNotMatch(html, /class="app-header/)
   })
@@ -39,7 +39,7 @@ for (const [component, active] of [[App, 'monitor'], [App, 'activity'], [Publish
 
 test('signed-out direct monitor rendering does not fabricate a user or show sign out', () => {
   const html = renderToStaticMarkup(createElement(App))
-  assert.doesNotMatch(html, /sidebar-user|sidebar-signout|Engine connected/)
+  assert.doesNotMatch(html, /sidebar-user|Sign out|Engine connected/)
   assert.match(html, /Connecting/)
 })
 
@@ -47,6 +47,16 @@ test('Settings renders its page title without a duplicate breadcrumb', () => {
   const html = renderToStaticMarkup(createElement(AuthAccounts, props))
   assert.match(html, /<h1>Settings<\/h1>/)
   assert.doesNotMatch(html, /aria-label="Breadcrumb"/)
+})
+
+test('Settings has a visible Sign out panel for the current user', () => {
+  const html = renderToStaticMarkup(createElement(AuthAccounts, props))
+  const panel = html.match(/<section[^>]*aria-labelledby="signout-title"[^>]*>([\s\S]*?)<\/section>/)
+  assert.ok(panel, 'Sign out must have a dedicated panel')
+  assert.doesNotMatch(panel[0], /\bhidden=/)
+  assert.match(panel[1], /<h2 id="signout-title">Sign out<\/h2>/)
+  assert.match(panel[1], /Signed in as <strong>&lt;Admin &amp; user&gt;<\/strong>/)
+  assert.match(panel[1], /<button[^>]*>Sign out<\/button>/)
 })
 
 test('Settings opens Updates while preserving hidden administrator and credential panels', () => {
