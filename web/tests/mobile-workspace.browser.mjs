@@ -7,7 +7,7 @@ import { createServer } from '../node_modules/vite/dist/node/index.js'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), server: { host: '127.0.0.1', port: 0, hmr: false } })
 await server.listen()
-const browser = await chromium.launch({ channel: process.env.BROWSER_CHANNEL || 'msedge', headless: true })
+const browser = await chromium.launch({ ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : { channel: process.env.BROWSER_CHANNEL || 'msedge' }), headless: true })
 const screenshots = process.env.MOBILE_SCREENSHOT_DIR
 if (screenshots) await mkdir(screenshots, { recursive: true })
 const pages = ['monitor', 'activity', 'publishers', 'settings']
@@ -56,6 +56,7 @@ async function exercise(viewport) {
     for (let i = 0; i < pages.length; i++) {
       await nav.getByRole('link', { name: names[i], exact: true }).click()
       await page.getByRole('heading', { name: titles[i], level: 1, exact: true }).waitFor()
+      assert.equal(await page.getByRole('navigation', { name: 'Breadcrumb', exact: true }).count(), 0, `${pages[i]} has no redundant label above its title`)
       assert.equal(await page.evaluate(() => window.__mobileLayoutMarker), 'mounted', 'Navigation remains client-side')
       assert.equal(await nav.locator('[aria-current="page"]').getAttribute('href'), `#${pages[i]}`)
       const geometry = await measure()

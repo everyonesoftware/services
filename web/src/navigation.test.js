@@ -24,15 +24,15 @@ test('unknown, incomplete and malformed detail URLs fail closed without decoding
   for (const hash of ['', '#monitor', '#activity']) assert.deepEqual(serviceRoute(hash), { kind: 'monitor' })
 })
 
-test('breadcrumb has exactly one current item, encoded parent links and escaped labels', () => {
-  const html = renderToStaticMarkup(createElement(Breadcrumb, { project: 'media / archive', container: '<script>container</script>' }))
+test('breadcrumb contains only parent links with encoded URLs and escaped labels', () => {
+  const parentProject = 'media / <script>'
+  const html = renderToStaticMarkup(createElement(Breadcrumb, { parentProject }))
   assert.match(html, /aria-label="Breadcrumb"/)
-  assert.equal((html.match(/aria-current="page"/g) || []).length, 1)
-  assert.match(html, /href="#monitor"/)
-  assert.match(html, /href="#service\/media%20%2F%20archive"/)
-  assert.match(html, /&lt;script&gt;container&lt;\/script&gt;/)
-  assert.doesNotMatch(html, /<script>/)
+  assert.deepEqual([...html.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map(match => match.slice(1)), [
+    ['#monitor', 'Monitor'],
+    [serviceHref(parentProject), 'media / &lt;script&gt;'],
+  ])
+  assert.doesNotMatch(html, /<script>|aria-current/)
   const root = renderToStaticMarkup(createElement(Breadcrumb))
-  assert.match(root, /aria-current="page">Monitor/)
-  assert.doesNotMatch(root, /<a/)
+  assert.match(root, /<ol><li><a href="#monitor">Monitor<\/a><\/li><\/ol>/)
 })

@@ -55,7 +55,8 @@ try {
     await projectLink.click()
     await page.getByRole('heading', { name: projectName, exact: true }).waitFor()
     assert.equal(new URL(page.url()).hash, serviceHash)
-    await page.locator('.breadcrumb [aria-current="page"]').getByText(projectName, { exact: true }).waitFor()
+    const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb', exact: true })
+    assert.deepEqual(await breadcrumb.getByRole('listitem').allTextContents(), ['Monitor'])
     assert.equal(await page.locator('.service-detail details,.service-detail summary').count(), 0)
     assert.equal(await page.locator('.container-link').count(), 2)
     const cardLayout = await page.locator('.container-link').first().evaluate(element => {
@@ -78,6 +79,8 @@ try {
     await page.locator('.container-link').filter({ hasText: containerName }).click()
     await page.getByRole('heading', { name: containerName, exact: true }).waitFor()
     assert.equal(new URL(page.url()).hash, containerHash)
+    assert.deepEqual(await breadcrumb.getByRole('link').allTextContents(), ['Monitor', projectName])
+    assert.equal(await breadcrumb.getByRole('listitem').count(), 2)
     await page.getByRole('heading', { name: 'Runtime', exact: true }).waitFor()
     await page.getByText('GET /health → 200 OK <script>', { exact: true }).waitFor()
     assert.equal(await page.locator('.container-page script').count(), 0)
@@ -110,6 +113,7 @@ try {
     await page.getByRole('heading', { name: 'Container not found', exact: true }).waitFor()
     await page.goto(base + '#service/%E0%A4%A')
     await page.getByRole('heading', { name: 'Page not found', exact: true }).waitFor()
+    assert.deepEqual(await breadcrumb.getByRole('listitem').allTextContents(), ['Monitor'])
     failProjects = true
     await page.goto(base + serviceHash)
     await page.reload()

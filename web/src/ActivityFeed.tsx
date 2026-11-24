@@ -6,7 +6,6 @@ import { ActivityHelp, OperationNotices, OperationRow } from './DockerActivity.t
 import type { MonitorEvent, Operation } from './types.ts'
 import { ActivityTimestamp } from './ActivityTimestamp.tsx'
 import { PageHeader } from './PageHeader.tsx'
-import { Breadcrumb } from './Breadcrumb.tsx'
 import { FilterSearch, FilterToolbar, IconDropdown, ResetView } from './FilterToolbar.tsx'
 import './ActivityFeed.css'
 
@@ -51,7 +50,6 @@ export function ActivityFeed({ operations, events, operationsLoading, eventsLoad
   const loading = kind === 'operations' ? operationsLoading : kind === 'events' ? eventsLoading : operationsLoading || eventsLoading
   const unavailable = kind === 'operations' ? !!operationsError : kind === 'events' ? !!eventsError : !!operationsError || !!eventsError
   return <main className="workspace unified-activity">
-    <Breadcrumb root="Activity" />
     <PageHeader title="Activity" />
     <OperationNotices operations={operations} error={operationsError} onAcknowledged={onAcknowledged} />
     {eventsError && <p className="notice danger" role="alert">Monitor events unavailable: {eventsError}. Last observed events are shown; current state is unknown.</p>}

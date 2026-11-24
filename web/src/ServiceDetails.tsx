@@ -46,7 +46,7 @@ export function ServiceDetail(props: DetailProps) {
   const updates = availableServices(project)
   const services = new Set(project.containers.map(container => container.service).filter(Boolean))
   return <main className="workspace service-detail">
-    <Breadcrumb project={project.name} />
+    <Breadcrumb />
     <header className="detail-header"><div className="detail-identity"><ProjectArtwork {...props} /><div><h1>{project.name}</h1><p>{project.name === 'Standalone' ? 'Ungrouped containers' : 'Collected service'} · {project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</p></div></div><div className="heading-actions"><ProjectUpdateButton {...props} /></div></header>
     {feedback}
     <div className="detail-status"><StatusBadge status={projectHealthStatus(project)} /><span>{project.updateState === 'refreshing' ? 'Refreshing inventory after Compose work.' : project.updateState ? 'Compose work is tracked in Activity.' : 'Status reflects the latest observed container health.'}</span></div>
@@ -67,7 +67,7 @@ export function ContainerDetail({ container: rawContainer, ...props }: DetailPro
   const container = currentContainer(project, rawContainer)
   const siblings = project.containers.filter(sibling => sibling.name !== container.name)
   return <main className="workspace service-detail container-page">
-    <Breadcrumb project={project.name} container={container.name} />
+    <Breadcrumb parentProject={project.name} />
     <header className="detail-header"><div className="detail-identity"><ContainerArtwork {...props} container={container} /><div><h1>{container.name}</h1><p>Container{container.service ? ` · ${container.service}` : ''}</p></div></div><div className="heading-actions"><ResolveButton {...props} container={container} /><a className="button secondary" href={serviceHref(project.name)}>View service <span aria-hidden="true">↗</span></a></div></header>
     {feedback}
     <div className="detail-status"><StatusBadge status={observedStatus(container)} /><span>{container.monitorReason || (container.health ? `Health check: ${container.health}` : 'No health check is configured; running does not confirm application health.')}</span></div>
