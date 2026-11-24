@@ -5,9 +5,47 @@ import { fetchLogs, LogCursorError, logDownload, mergeLogEntries, selectLogEntri
 import type { LogEntry, LogPage } from './logs.ts'
 import './Logs.css'
 
-export function LogsDetailTabs({ project, container, children }: { project: Project; container?: string; children: ReactNode }) {
+function visibleLogPosition(output: HTMLElement) {
+  const top = output.getBoundingClientRect().top + output.clientTop
+  const row = Array.from(output.querySelectorAll<HTMLElement>('[data-log-id]')).find(node => node.getBoundingClientRect().bottom > top)
+  return { row, offset: row ? row.getBoundingClientRect().top - top : 0, bottom: output.dataset.following === 'true', scrollTop: output.scrollTop }
+}
+
+type LogPosition = ReturnType<typeof visibleLogPosition>
+
+export function LogsDetailTabs({ project, container, title, status, children }: { project: Project; container?: string; title: string; status: ReactNode; children: ReactNode }) {
   const [tab, setTab] = useState('Overview')
+  const [focused, setFocused] = useState(false)
+  const enter = useRef<HTMLButtonElement>(null)
+  const exit = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const position = useRef<LogPosition | undefined>(undefined)
+  const clampedPosition = useRef<{ original: LogPosition; focused: LogPosition } | undefined>(undefined)
   const id = useId()
+  const toggleFocus = (next: boolean) => {
+    const output = panel.current?.querySelector<HTMLElement>('.logs-output')
+    if (output) {
+      const current = visibleLogPosition(output), clamped = clampedPosition.current
+      position.current = !next && !current.bottom && clamped?.original.row?.isConnected && current.row === clamped.focused.row && current.offset === clamped.focused.offset && current.scrollTop === clamped.focused.scrollTop ? clamped.original : current
+    }
+    clampedPosition.current = undefined
+    setFocused(next)
+  }
+  useLayoutEffect(() => {
+    const saved = position.current
+    if (!saved) return
+    position.current = undefined
+    const output = panel.current?.querySelector<HTMLElement>('.logs-output')
+    if (output && saved.bottom) output.scrollTop = output.scrollHeight
+    else if (output && saved.row?.isConnected) {
+      const target = output.scrollTop + saved.row.getBoundingClientRect().top - output.getBoundingClientRect().top - output.clientTop - saved.offset
+      output.scrollTop = target
+      // A taller pane can clamp a paused position; keep the original only until the view moves.
+      if (focused && target - output.scrollTop > 1) clampedPosition.current = { original: saved, focused: visibleLogPosition(output) }
+    }
+    const button = focused ? exit.current : enter.current
+    button?.focus({ preventScroll: true })
+  }, [focused])
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
@@ -15,18 +53,37 @@ export function LogsDetailTabs({ project, container, children }: { project: Proj
     setTab(next)
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${next}"]`)?.focus()
   }
-  return <><div className="detail-tabs" role="tablist" aria-label="Detail views" onKeyDown={keys}>{['Overview', 'Logs'].map(name => <button key={name} type="button" role="tab" data-tab={name} id={`${id}-${name}`} aria-controls={`${id}-panel`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name}</button>)}</div><div id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab}`} className={tab === 'Logs' ? 'detail-logs-panel' : undefined}>{tab === 'Overview' ? children : <LogsPanel key={`${project.name}/${container || ''}`} project={project} container={container} />}</div></>
+  return <><div className="detail-tabs-bar"><div className="detail-tabs" role="tablist" aria-label="Detail views" onKeyDown={keys}>{['Overview', 'Logs'].map(name => <button key={name} type="button" role="tab" data-tab={name} id={`${id}-${name}`} aria-controls={`${id}-panel`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name}</button>)}</div>{tab === 'Logs' && <button ref={enter} type="button" className="logs-focus-button" onClick={() => toggleFocus(true)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5" /></svg>Focus logs</button>}</div>
+    <div ref={panel} id={`${id}-panel`} role={focused ? 'region' : 'tabpanel'} aria-labelledby={focused ? `${id}-focus` : `${id}-${tab}`} className={tab === 'Logs' ? `detail-logs-panel${focused ? ' logs-focused' : ''}` : undefined} onKeyDown={event => {
+      if (!focused || event.key !== 'Escape' || event.defaultPrevented || (event.target instanceof Element && event.target.closest('input, select, textarea, [contenteditable]'))) return
+      event.preventDefault()
+      event.stopPropagation()
+      toggleFocus(false)
+    }}>
+      {focused && <header className="logs-focus-header"><h1 id={`${id}-focus`}>{title} <span>/ Logs</span></h1>{status}<button ref={exit} type="button" className="logs-focus-button" onClick={() => toggleFocus(false)}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7" /></svg>Exit focus</button></header>}
+      {tab === 'Overview' ? children : <LogsPanel key={`${project.name}/${container || ''}`} project={project} container={container} focused={focused} />}
+    </div></>
 }
 
 type View = { entries: LogEntry[]; loading: boolean; following: boolean; hasMore: boolean; error: string; warnings: NonNullable<LogPage['warnings']>; reset: boolean; recycled: boolean; cursorInvalid?: boolean }
 const initialView: View = { entries: [], loading: true, following: true, hasMore: false, error: '', warnings: [], reset: false, recycled: false }
 type Actions = { older: () => void; latest: () => void; scroll: () => void; retry: () => void }
-function LogsPanel({ project, container }: { project: Project; container?: string }) {
+function LogsPanel({ project, container, focused }: { project: Project; container?: string; focused: boolean }) {
   const [selected, setSelected] = useState(container || '')
-  return <div className="logs-scope-view">{container === undefined && <label className="logs-scope">Container<select aria-label="Container" value={selected} onChange={event => setSelected(event.target.value)}><option value="">All containers</option>{project.containers.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}<LogsOutput key={selected} project={project} container={selected || undefined} /></div>
+  const select = useRef<HTMLSelectElement>(null)
+  const restoreSelectFocus = useRef(false)
+  useLayoutEffect(() => {
+    if (restoreSelectFocus.current) select.current?.focus({ preventScroll: true })
+    restoreSelectFocus.current = false
+  }, [selected])
+  const scope = container === undefined && <label>Container<select ref={select} aria-label="Container" value={selected} onChange={event => {
+    restoreSelectFocus.current = event.currentTarget === document.activeElement
+    setSelected(event.currentTarget.value)
+  }}><option value="">All containers</option>{project.containers.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+  return <LogsOutput key={selected} project={project} container={selected || undefined} scope={scope} focused={focused} />
 }
 
-function LogsOutput({ project, container }: { project: Project; container?: string }) {
+function LogsOutput({ project, container, scope, focused }: { project: Project; container?: string; scope: ReactNode; focused: boolean }) {
   const [view, setView] = useState<View>(initialView)
   const [query, setQuery] = useState('')
   const [stream, setStream] = useState('')
@@ -41,7 +98,7 @@ function LogsOutput({ project, container }: { project: Project; container?: stri
     let second = 0
     const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { changingPresentation.current = false }) })
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second) }
-  }, [query, stream, source, wrap])
+  }, [query, stream, source, wrap, focused])
   const output = useRef<HTMLDivElement>(null)
   const actions = useRef<Actions>({ older() {}, latest() {}, scroll() {}, retry() {} })
   const pendingPosition = useRef<{ id?: string; top?: number; bottom?: boolean } | undefined>(undefined)
@@ -142,6 +199,7 @@ function LogsOutput({ project, container }: { project: Project; container?: stri
   }
   return <section className="logs-view" aria-label="Container logs">
     <div className="logs-filters">
+      {scope}
       <label className="logs-search">Search loaded logs<input type="search" aria-label="Search loaded logs" placeholder="Search loaded logs" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <label>Stream (loaded)<select aria-label="Stream (loaded)" value={stream} onChange={event => setStream(event.target.value)}><option value="">All streams</option>{['stdout', 'stderr', 'tty'].map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Source (loaded)<select aria-label="Source (loaded)" value={source} onChange={event => setSource(event.target.value)}><option value="">All sources</option>{project.containers.filter(item => !container || item.id === container).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -153,6 +211,6 @@ function LogsOutput({ project, container }: { project: Project; container?: stri
     {view.recycled && !view.reset && <p className="logs-buffer-note">Earlier loaded output was released to keep the live buffer bounded. Scroll up to load retained history again.</p>}
     {view.error && <p role="alert" className="logs-warning">Logs unavailable: {view.error}. Existing output retained. <button type="button" onClick={() => actions.current.retry()}>Retry logs</button></p>}
     {view.warnings.length > 0 && <details className="logs-warning" open><summary>Partial logs · {view.warnings.length} source warnings</summary>{view.warnings.map((warning, index) => <p key={`${warning.containerId}-${index}`}>{warning.container}: {warning.message}</p>)}</details>}
-    <div ref={output} className={`logs-output${wrap ? ' wrap' : ''}`} role="region" aria-label="Log output" tabIndex={0} onScroll={() => actions.current.scroll()}>{filtered.map(entry => <div className="log-line" data-log-id={entry.id} key={entry.id}><time dateTime={entry.timestamp} title={entry.timestamp}>{entry.timestamp}</time><span className="log-source">{entry.container}</span><span className={`log-stream ${entry.stream}`}>{entry.stream}</span><span className="log-message">{entry.message}</span></div>)}{!filtered.length && !view.loading && !view.error && <p>{view.entries.length ? 'No matching loaded logs. Filters only search loaded lines; Load older to inspect more history.' : 'No logs reported.'}</p>}</div>
+    <div ref={output} className={`logs-output${wrap ? ' wrap' : ''}`} data-following={view.following} role="region" aria-label="Log output" tabIndex={0} onScroll={() => actions.current.scroll()}>{filtered.map(entry => <div className="log-line" data-log-id={entry.id} key={entry.id}><time dateTime={entry.timestamp} title={entry.timestamp}>{entry.timestamp}</time><span className="log-source">{entry.container}</span><span className={`log-stream ${entry.stream}`}>{entry.stream}</span><span className="log-message">{entry.message}</span></div>)}{!filtered.length && !view.loading && !view.error && <p>{view.entries.length ? 'No matching loaded logs. Filters only search loaded lines; Load older to inspect more history.' : 'No logs reported.'}</p>}</div>
   </section>
 }

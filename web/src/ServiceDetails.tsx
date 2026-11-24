@@ -45,12 +45,13 @@ export function ServiceDetail(props: DetailProps) {
   const { project, feedback } = props
   const updates = availableServices(project)
   const services = new Set(project.containers.map(container => container.service).filter(Boolean))
+  const status = <StatusBadge status={projectHealthStatus(project)} />
   return <main className="workspace service-detail">
     <Breadcrumb />
-    <header className="detail-header"><div className="detail-identity"><ProjectArtwork {...props} /><div><h1>{project.name}</h1><p>{project.name === 'Standalone' ? 'Ungrouped containers' : 'Collected service'} · {project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</p></div></div><div className="heading-actions"><ProjectUpdateButton {...props} /></div></header>
+    <header className="detail-header"><div className="detail-identity"><ProjectArtwork {...props} /><div><h1>{project.name}</h1><div className="detail-metadata"><p>{project.name === 'Standalone' ? 'Ungrouped containers' : 'Collected service'} · {project.containers.length} {project.containers.length === 1 ? 'container' : 'containers'}</p><span className="detail-inline-status">{status}</span></div></div></div><div className="heading-actions"><ProjectUpdateButton {...props} /></div></header>
     {feedback}
-    <div className="detail-status"><StatusBadge status={projectHealthStatus(project)} /><span>{project.updateState === 'refreshing' ? 'Refreshing inventory after Compose work.' : project.updateState ? 'Compose work is tracked in Activity.' : 'Status reflects the latest observed container health.'}</span></div>
-    <LogsDetailTabs key={project.name} project={project}><div className="detail-grid"><div>
+    <div className="detail-status">{status}<span>{project.updateState === 'refreshing' ? 'Refreshing inventory after Compose work.' : project.updateState ? 'Compose work is tracked in Activity.' : 'Status reflects the latest observed container health.'}</span></div>
+    <LogsDetailTabs key={project.name} project={project} title={project.name} status={status}><div className="detail-grid"><div>
       <section className="detail-section" aria-labelledby="service-containers-title"><div className="section-title"><h2 id="service-containers-title">Containers <span className="count">{project.containers.length}</span></h2><span className="section-note">Open to inspect</span></div><div className="service-containers">{project.containers.map(container => <ContainerLink key={container.name} {...props} container={container} />)}</div>{project.containers.length === 0 && <p className="detail-empty">No containers reported for this service.</p>}</section>
       <PublisherLinks connections={props.publishers ?? []} />
       <ServiceEvents {...props} />
@@ -66,12 +67,13 @@ export function ContainerDetail({ container: rawContainer, ...props }: DetailPro
   const { project, feedback } = props
   const container = currentContainer(project, rawContainer)
   const siblings = project.containers.filter(sibling => sibling.name !== container.name)
+  const status = <StatusBadge status={observedStatus(container)} />
   return <main className="workspace service-detail container-page">
     <Breadcrumb parentProject={project.name} />
-    <header className="detail-header"><div className="detail-identity"><ContainerArtwork {...props} container={container} /><div><h1>{container.name}</h1><p>Container{container.service ? ` · ${container.service}` : ''}</p></div></div><div className="heading-actions"><ResolveButton {...props} container={container} /><a className="button secondary" href={serviceHref(project.name)}>View service <span aria-hidden="true">↗</span></a></div></header>
+    <header className="detail-header"><div className="detail-identity"><ContainerArtwork {...props} container={container} /><div><h1>{container.name}</h1><div className="detail-metadata"><p>Container{container.service ? ` · ${container.service}` : ''}</p><span className="detail-inline-status">{status}</span></div></div></div><div className="heading-actions"><ResolveButton {...props} container={container} /><a className="button secondary" href={serviceHref(project.name)}>View service <span aria-hidden="true">↗</span></a></div></header>
     {feedback}
-    <div className="detail-status"><StatusBadge status={observedStatus(container)} /><span>{container.monitorReason || (container.health ? `Health check: ${container.health}` : 'No health check is configured; running does not confirm application health.')}</span></div>
-    <LogsDetailTabs key={`${project.name}/${container.id}`} project={project} container={container.id}><div className="detail-grid container-inspection"><div>
+    <div className="detail-status">{status}<span>{container.monitorReason || (container.health ? `Health check: ${container.health}` : 'No health check is configured; running does not confirm application health.')}</span></div>
+    <LogsDetailTabs key={`${project.name}/${container.id}`} project={project} container={container.id} title={container.name} status={status}><div className="detail-grid container-inspection"><div>
       <section className="detail-section" aria-labelledby="container-runtime-title"><div className="section-title"><h2 id="container-runtime-title">Runtime</h2></div><dl className="detail-panel container-facts runtime-facts"><Fact label="State">{container.state}</Fact><Fact label="Health check">{container.health || 'Not configured'}</Fact><Fact label="Restarts">{container.restartCount ?? 'Not reported'}</Fact><Fact label="Exit code">{container.exitCode ?? 'Not reported'}</Fact><Fact label="OOM killed">{container.oomKilled === undefined ? 'Not reported' : container.oomKilled ? 'Yes' : 'No'}</Fact><Fact label="Started">{dateLabel(container.startedAt)}</Fact></dl></section>
       <PublisherLinks connections={publishersForContainers(props.publishers ?? [], [container])} />
       <section className="detail-section health-output" aria-labelledby="container-health-title"><div className="section-title"><h2 id="container-health-title">Health output</h2><span className="section-note">Latest reported check</span></div><pre>{container.healthOutput || 'No health-check output reported.'}</pre></section>
