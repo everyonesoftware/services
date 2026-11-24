@@ -22,8 +22,8 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 		return result, err
 	}
 	files := map[string]string{}
-	missingWorkflow := false
-	for _, path := range []string{".github/workflows/verify-and-publish.yml", "scripts/publish-notification.mjs", ".github/workflows/services-connection-test.yml", "scripts/publisher-connection-test.mjs"} {
+	const historicalPath = ".github/workflows/verify-and-publish.yml"
+	for _, path := range []string{historicalPath, senderPath, connectionPath, callbackPath} {
 		var v struct {
 			Type     string `json:"type"`
 			Encoding string `json:"encoding"`
@@ -34,8 +34,8 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 			return result, err
 		}
 		if status == 404 {
-			if path == ".github/workflows/verify-and-publish.yml" {
-				missingWorkflow = true
+			if path == historicalPath {
+				return o.inspectWorkflowPlan(repository, token)
 			}
 			result.Problems = append(result.Problems, "Missing "+path+" on the default branch.")
 			continue
@@ -46,25 +46,16 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 			continue
 		}
 		files[path] = string(content)
+		// Reusable and adapted publishers can use another filename even when a
+		// verification-only workflow occupies the historical path. Logs also
+		// needs the pinned registry script checked. Leave the legacy fast path
+		// intact, but don't fetch a local sender for these snapshot inspections.
+		if path == historicalPath && (strings.Contains(files[path], logsCaptureMarker) || reusableV1Signal(files[path]) ||
+			(!strings.Contains(files[path], "publish-notification.mjs") && !existingHook(files[path]))) {
+			return o.inspectWorkflowPlan(repository, token)
+		}
 	}
-	workflow := files[".github/workflows/verify-and-publish.yml"]
-	// Provisioning can retain another filename. Logs also needs the pinned
-	// registry script checked even when using the historical workflow filename.
-	// A plan with pending changes is not an installed integration.
-	if missingWorkflow || strings.Contains(workflow, logsCaptureMarker) {
-		snapshot, err := o.planWorkflow(repository, token)
-		if err != nil {
-			return result, err
-		}
-		if snapshot.plan.Supported && len(snapshot.plan.Files) == 0 {
-			return Inspection{Supported: true, Problems: []string{}}, nil
-		}
-		if snapshot.plan.Supported {
-			return Inspection{Problems: []string{"Open and review the proposed workflow setup pull request. Merge it, then review setup again before applying the publisher connection."}}, nil
-		}
-		return Inspection{Problems: snapshot.plan.Problems}, nil
-	}
-	if workflow != "" {
+	if workflow := files[historicalPath]; workflow != "" {
 		if err := validateNotificationHook(workflow); err != nil {
 			result.Problems = append(result.Problems, "verify-and-publish.yml: "+err.Error())
 		}
@@ -96,6 +87,20 @@ func (c *Client) Inspect(ctx context.Context, app App, repository Repository) (I
 	}
 	result.Supported = len(result.Problems) == 0
 	return result, nil
+}
+
+func (o *operation) inspectWorkflowPlan(repository Repository, token string) (Inspection, error) {
+	snapshot, err := o.planWorkflow(repository, token)
+	if err != nil {
+		return Inspection{Problems: []string{}}, err
+	}
+	if snapshot.plan.Supported && len(snapshot.plan.Files) == 0 {
+		return Inspection{Supported: true, Problems: []string{}}, nil
+	}
+	if snapshot.plan.Supported {
+		return Inspection{Problems: []string{"Open and review the proposed workflow setup pull request. Merge it, then review setup again before applying the publisher connection."}}, nil
+	}
+	return Inspection{Problems: snapshot.plan.Problems}, nil
 }
 func containsAll(text string, parts ...string) bool {
 	for _, part := range parts {
