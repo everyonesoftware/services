@@ -127,7 +127,7 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 	if err != nil {
 		return s, err
 	}
-	if removal && (o.next || (status == 200 && entries == nil)) {
+	if o.next || (status == 200 && entries == nil) {
 		return s, errors.New("GitHub workflow directory listing is incomplete")
 	}
 	if len(entries) > 80 {
@@ -147,12 +147,18 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 	}
 	sort.Strings(paths)
 	files := map[string]string{}
-	for _, path := range append(append([]string{}, paths...), senderPath, callbackPath) {
-		content, _, e := o.workflowContent(repo, token, path, s.sha)
-		if e != nil {
-			return s, e
+	readFiles := func(paths []string) error {
+		for _, path := range paths {
+			content, _, err := o.workflowContent(repo, token, path, s.sha)
+			if err != nil {
+				return err
+			}
+			files[path] = content
 		}
-		files[path] = content
+		return nil
+	}
+	if err := readFiles(paths); err != nil {
+		return s, err
 	}
 	problem := func(message string) (workflowSnapshot, error) {
 		s.plan.Problems = append(s.plan.Problems, message)
@@ -160,12 +166,21 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 		return s, nil
 	}
 	if removal {
+		if err := readFiles([]string{senderPath, callbackPath}); err != nil {
+			return s, err
+		}
 		return planRemovalSnapshot(repo, s, paths, files)
 	}
 	hooks := 0
-	logsHook := false
+	logsHook, reusableHook := false, false
 	for _, path := range paths {
-		if existingHook(files[path]) {
+		if reusableV1Signal(files[path]) {
+			if err := validateReusableV1(files[path], repo.DefaultBranch); err != nil {
+				return problem(path + ": " + err.Error())
+			}
+			hooks++
+			reusableHook = true
+		} else if existingHook(files[path]) {
 			hooks++
 			logsHook = logsHook || strings.Contains(files[path], logsCaptureMarker)
 		} else if strings.Contains(files[path], "publish-notification.mjs") {
@@ -175,6 +190,13 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 	}
 	if hooks > 1 {
 		return problem("Multiple Services publication hooks are ambiguous; review them manually.")
+	}
+	localPaths := []string{callbackPath}
+	if !reusableHook {
+		localPaths = append(localPaths, senderPath)
+	}
+	if err := readFiles(localPaths); err != nil {
+		return s, err
 	}
 	if hooks == 0 {
 		candidate := ""
@@ -216,7 +238,7 @@ func (o *operation) planWorkflowKind(repo Repository, token string, removal bool
 		} else if !supportedSender(files[senderPath]) {
 			return problem("The existing publication sender is custom; it will not be overwritten.")
 		}
-	} else if !supportedSender(files[senderPath]) {
+	} else if !reusableHook && !supportedSender(files[senderPath]) {
 		return problem("The existing publication sender is missing or unsupported; review the existing hook manually.")
 	}
 	if logsHook {
