@@ -43,9 +43,14 @@ test('signed-out direct monitor rendering does not fabricate a user or show sign
   assert.match(html, /Connecting/)
 })
 
-test('Settings opens Updates while preserving hidden administrator and credential panels', () => {
+test('Settings renders its page title without a duplicate breadcrumb', () => {
   const html = renderToStaticMarkup(createElement(AuthAccounts, props))
   assert.match(html, /<h1>Settings<\/h1>/)
+  assert.doesNotMatch(html, /aria-label="Breadcrumb"/)
+})
+
+test('Settings opens Updates while preserving hidden administrator and credential panels', () => {
+  const html = renderToStaticMarkup(createElement(AuthAccounts, props))
   const sections = html.match(/<nav[^>]*aria-label="Settings sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
   assert.ok(sections, 'account sections must have a labeled switcher')
   assert.deepEqual([...sections.matchAll(/aria-pressed="(true|false)"[^>]*>([^<]+)</g)].map(match => [match[2], match[1]]), [['Updates', 'true'], ['Administrators', 'false'], ['API keys', 'false'], ['Password', 'false']])
